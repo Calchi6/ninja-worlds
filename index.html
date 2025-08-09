@@ -153,7 +153,9 @@ function enableTouchControls(){
 
 function buildLevel(){
   const solids=[], enemies=[], coins=[];
-  const W = 2600, GH = (window._CH || (innerHeight/(devicePixelRatio||1))) * .82;
+  const DPR   = window.devicePixelRatio || 1;
+const viewH = window._CH ? window._CH / DPR : innerHeight; // use CSS pixels, not device pixels
+const W = 2600, GH = viewH * 0.82;
   const addS=(x,y,w,h)=>solids.push({x,y,w,h});
   const addCoin=(x,y)=>coins.push({x,y,w:18,h:18,t:0});
   addS(0, GH, W, 22); addS(160, GH-120, 220, 18); addS(520, GH-200, 260, 18);
@@ -255,7 +257,13 @@ function togglePause(){ if(!running){ document.getElementById('pauseDlg').classL
   function resize(){ window._CW=c.width=innerWidth*(devicePixelRatio||1); window._CH=c.height=innerHeight*(devicePixelRatio||1); c.style.width=innerWidth+'px'; c.style.height=innerHeight+'px'; }
   resize(); addEventListener('resize',resize);
   if (createInput(c)) enableTouchControls();
-  L=buildLevel(); running=true;
+  L=buildLevel();// Spawn player on the ground near the start
+P.x = 80;
+P.y = L.groundY - P.h - 2;
+// Center camera on player at start
+cam.x = Math.max(0, P.x - (innerWidth * 0.38));
+cam.y = 0;
+ running=true;
   let last=performance.now(), fpsF=0,fps=0,t=0;
   function frame(now){ const dt=Math.min(50,now-last)/1000; last=now; if(running) update(dt); if(!lowPerf || (lowPerf && (fpsF%2===0))) drawLevel(g,c,L,now/1000); fpsF++; t+=dt; if(t>=1){fps=fpsF;fpsF=0;t=0;} chip.textContent=`FPS: ${fps} | enemies: ${L.enemies.length}`; requestAnimationFrame(frame); }
   requestAnimationFrame(frame);
