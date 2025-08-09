@@ -40,10 +40,7 @@
             background:green;color:white;font-size:14px;
             border-radius:4px;z-index:9999;">
   Build OK – <span id="build-time"></span>
-</div>
-
 <script>
-  <script>
 // Show current date/time of build
 fetch('https://api.github.com/repos/Calchi6/ninja-worlds/commits/main')
   .then(response => response.json())
@@ -61,14 +58,6 @@ setTimeout(() => {
   const el = document.getElementById('build-status');
   if (el) el.remove();
 }, 3000);
-</script>
-
-  });
-
-  setTimeout(() => {
-    const el = document.getElementById('build-status');
-    if (el) el.remove();
-  }, 3000);
 </script>
 
 <canvas id="game" aria-label="Ninja Worlds v0.8"></canvas>
