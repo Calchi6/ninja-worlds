@@ -32,7 +32,7 @@
   Build OK – <span id="build-time"></span>
 </div>
 <script>
-// Show current date/time of build
+// Show current date/time of build (GitHub commit time)
 fetch('https://api.github.com/repos/Calchi6/ninja-worlds/commits/main')
   .then(r => r.json())
   .then(data => {
@@ -103,9 +103,9 @@ setTimeout(() => {
 </div>
 
 <script>
+/* ---------- utils ---------- */
 function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
 function AABB(a,b){ return a.x < b.x+b.w && a.x+a.w > b.x && a.y < b.y+b.h && a.y+a.h > b.y; }
-
 function beep(freq=880, dur=0.08){
   try{
     const AC = window.AudioContext||window.webkitAudioContext;
@@ -117,6 +117,7 @@ function beep(freq=880, dur=0.08){
   }catch(_){}
 }
 
+/* ---------- globals ---------- */
 let L=null;
 const P = {x:100,y:220,w:28,h:40,vx:0,vy:0,face:1,on:false,jumps:0,maxJ:1,dashCd:0,hp:3,iFrames:0,coins:0,_wasOn:false};
 const cam = {x:0,y:0,shake:0};
@@ -125,6 +126,11 @@ let running = false, lowPerf=false;
 let COYOTE = 0, JBUF = 0;
 const COYOTE_TIME = 0.08, JUMP_BUF = 0.10;
 
+/* Camera constants */
+const CAM_LERP = 0.12;   // follow speed (0.05 very smooth, 0.3 snappy)
+const CAM_OFFSET = 0.38; // player horizontal screen position (0.5 = centered)
+
+/* ---------- input ---------- */
 const keys = Object.create(null);
 function createInput(canvas){
   const touch = 'ontouchstart' in window || navigator.maxTouchPoints>0;
@@ -133,7 +139,6 @@ function createInput(canvas){
   canvas.addEventListener('pointerdown', ()=>canvas.focus());
   return touch;
 }
-
 function enableTouchControls(){
   const tc = document.getElementById('touch'); tc.style.display='flex';
   function bindHold(el, kDown, kUp){
@@ -149,69 +154,92 @@ function enableTouchControls(){
   bindHold(document.getElementById('tJump'),  ()=>{ keys[' ']=keys['space']=true; },   ()=>{ keys[' ']=keys['space']=false; });
   bindHold(document.getElementById('tDash'),  ()=>{ keys['shift']=true; },              ()=>{ keys['shift']=false; });
   bindHold(document.getElementById('tAtk'),   ()=>{ keys['j']=true; },                  ()=>{ keys['j']=false; });
-} /* <-- this closes enableTouchControls() */
-/* Camera constants */
-const CAM_LERP = 0.12;   // Camera follow speed
-const CAM_OFFSET = 0.38; // Player position on screen (0.5 = centered)
+} /* closes enableTouchControls */
 
+/* ---------- world ---------- */
 function buildLevel(){
   const solids=[], enemies=[], coins=[];
-  const DPR   = window.devicePixelRatio || 1;
-const viewH = window._CH ? window._CH / DPR : innerHeight; // use CSS pixels, not device pixels
-const W = 2600, GH = viewH * 0.82;
+  const DPR = window.devicePixelRatio || 1;
+  const viewH = window._CH ? window._CH / DPR : innerHeight; // CSS pixels
+  const W = 2600, GH = viewH * 0.82;
+
   const addS=(x,y,w,h)=>solids.push({x,y,w,h});
   const addCoin=(x,y)=>coins.push({x,y,w:18,h:18,t:0});
-  addS(0, GH, W, 22); addS(160, GH-120, 220, 18); addS(520, GH-200, 260, 18);
-  addS(940, GH-140, 200, 18); addS(1320, GH-220, 260, 18); addS(1780, GH-140, 200, 18); addS(2100, GH-200, 220, 18);
+
+  addS(0, GH, W, 22);
+  addS(160, GH-120, 220, 18);
+  addS(520, GH-200, 260, 18);
+  addS(940, GH-140, 200, 18);
+  addS(1320, GH-220, 260, 18);
+  addS(1780, GH-140, 200, 18);
+  addS(2100, GH-200, 220, 18);
+
   for(let i=0;i<10;i++) addCoin(240+i*180, GH-160+(i&1?-30:0));
   for(let i=0;i<4;i++) enemies.push({x:620+i*360,y:GH-64,w:44,h:44,vx:0,vy:0,t:0,type:(i%2?'ronin':'monk'),hp:2});
+
   const portal={x:W-140,y:GH-160,w:46,h:128};
   return {solids,enemies,coins,portal,width:W,groundY:GH};
 }
 
+/* ---------- render ---------- */
 function drawLevel(g,c,l,now){
   const cw=window._CW||innerWidth, ch=window._CH||innerHeight;
   g.fillStyle='#0b0d12'; g.fillRect(0,0,cw,ch);
+
   g.save(); g.globalAlpha=.25;
   for(let i=0;i<12;i++){ g.fillStyle='#2a5c39'; const x=((i*180-(cam.x*0.3|0))%(cw+200))-100; g.fillRect(x,ch-200,10,200); }
   g.restore();
+
   g.fillStyle='#283341'; l.solids.forEach(s=>g.fillRect(s.x-cam.x,s.y-cam.y,s.w,s.h));
+
   l.coins.forEach(C=>{ g.save(); g.globalAlpha=.9; g.beginPath(); g.arc(C.x-cam.x,C.y-cam.y,8,0,Math.PI*2); g.fillStyle='gold'; g.fill(); g.restore(); });
+
   const PRTL=l.portal; g.save(); g.globalAlpha=.8; const grd=g.createLinearGradient(PRTL.x-cam.x,PRTL.y,PRTL.x-cam.x,PRTL.y+PRTL.h);
   grd.addColorStop(0,'#45fd6c'); grd.addColorStop(.7,'#85ffac'); grd.addColorStop(1,'#9de5b1'); g.fillStyle=grd; g.fillRect(PRTL.x-cam.x,PRTL.y-cam.y,PRTL.w,PRTL.h); g.restore();
+
   if (slashTimer>0){ g.fillStyle='rgba(255,255,255,.22)'; const r=attackHitbox(); g.fillRect(r.x-cam.x,r.y-cam.y,r.w,r.h); }
+
   if(P.iFrames>0){ g.save(); g.globalAlpha=.35; g.fillStyle='#a0e8ff'; g.fillRect(P.x-cam.x-6,P.y-cam.y-6,P.w+12,P.h+12); g.restore(); }
   g.fillStyle='#e6eef7'; g.fillRect(P.x-cam.x,P.y-cam.y,P.w,P.h);
+
   L.enemies.forEach(E=>{ g.fillStyle=E.type==='ronin'?'#ff6e6e':'#7aa6ff'; g.fillRect(E.x-cam.x,E.y-cam.y,E.w,E.h); });
 }
 
+/* ---------- HUD ---------- */
 function setHUD(){
   const hpEl=document.getElementById('hp'), coinEl=document.getElementById('coins');
   hpEl.textContent='HP: '+'❤'.repeat(P.hp)+'♡'.repeat(Math.max(0,3-P.hp));
   coinEl.textContent='Coins: '+(P.coins|0);
 }
 
+/* ---------- damage / win / lose ---------- */
 function hitPlayer(dmg){ if(P.iFrames>0||dmg<=0) return; P.hp=Math.max(0,P.hp-dmg); P.iFrames=1.0; P.vy=-220; cam.shake=6; beep(220,.06); if(P.hp===0) return gameOver(); }
 function gameOver(){ running=false; document.getElementById('gameOverDlg').classList.remove('hidden'); }
 function winLevel(){ running=false; document.getElementById('winDlg').classList.remove('hidden'); }
 
+/* ---------- collisions ---------- */
 function resolveCollisions(box, solids){
   for(const s of solids){
     if(!AABB(box,s)) continue;
     const dx1=(s.x+s.w)-box.x, dx2=(box.x+box.w)-s.x, dy1=(s.y+s.h)-box.y, dy2=(box.y+box.h)-s.y;
     const minX=Math.min(dx1,dx2), minY=Math.min(dy1,dy2);
-    if(minX<minY){ box.x += (dx1<dx2?dx1:-dx2); }
-    else{ box.y += (dy1<dy2?dy1:-dy2);
+    if(minX<minY){
+      box.x += (dx1<dx2?dx1:-dx2);
+    }else{
+      box.y += (dy1<dy2?dy1:-dy2);
       if(dy1<dy2){ P.on=true; P.vy=0; P.jumps=0; if(!P._wasOn){ cam.shake=3; beep(180,.03);} }
       else if(P.vy<0){ P.vy=0; }
     }
   }
 }
+
+/* ---------- gameplay ---------- */
 function attackHitbox(){ const w=34,h=28,ox=P.face>0?P.w:-w; return {x:P.x+ox,y:P.y+(P.h-h)/2,w,h}; }
 let slashTimer=0;
 
 function update(dt){
   P._wasOn = P.on;
+
   COYOTE = Math.max(0, P.on ? COYOTE_TIME : COYOTE - dt);
   JBUF   = Math.max(0, JBUF - dt);
   P.iFrames = Math.max(0, P.iFrames - dt);
@@ -232,56 +260,122 @@ function update(dt){
   if(dash && P.dashCd<=0){ P.vx += 360*P.face; P.dashCd=.35; beep(440,.05); }
   P.dashCd=Math.max(0,P.dashCd-dt);
 
-  if(atk){ const hit=attackHitbox(); for(let i=L.enemies.length-1;i>=0;i--){ const E=L.enemies[i]; if(AABB(hit,{x:E.x,y:E.y,w:E.w,h:E.h})){ L.enemies.splice(i,1); beep(520,.07); cam.shake=5; } } slashTimer=.12; keys['j']=false; }
+  if(atk){
+    const hit=attackHitbox();
+    for(let i=L.enemies.length-1;i>=0;i--){
+      const E=L.enemies[i];
+      if(AABB(hit,{x:E.x,y:E.y,w:E.w,h:E.h})){ L.enemies.splice(i,1); beep(520,.07); cam.shake=5; }
+    }
+    slashTimer=.12; keys['j']=false;
+  }
 
+  // integrate + collide
   P.vy += MOVE.GRAV*dt;
-  P.x += P.vx*dt; P.y += P.vy*dt; P.on=false;
-  resolveCollisions({x:P.x,y:P.y,w:P.w,h:P.h}, L.solids);
+  P.x += P.vx*dt; P.y += P.vy*dt;
+  P.on=false;
+  resolveCollisions(P, L.solids); // <-- write back directly to P
   P.x = clamp(P.x, 0, L.width-P.w);
   if(P.y > L.groundY + 400) hitPlayer(3);
 
-  L.enemies.forEach(E=>{ E.t+=dt; const patrol=Math.sin(E.t*.8)*40; const dx=P.x-E.x; const chase=Math.abs(dx)<260?Math.sign(dx)*60:0; E.vx=(patrol+chase)*dt*6; E.x += E.vx*dt;
+  // enemies
+  L.enemies.forEach(E=>{
+    E.t+=dt; const patrol=Math.sin(E.t*.8)*40; const dx=P.x-E.x; const chase=Math.abs(dx)<260?Math.sign(dx)*60:0;
+    E.vx=(patrol+chase)*dt*6; E.x += E.vx*dt;
     if(E.y < L.groundY - E.h){ E.vy=(E.vy||0)+MOVE.GRAV*dt; E.y+=E.vy*dt; } else { E.y=L.groundY-E.h; E.vy=0; }
     if(AABB({x:P.x,y:P.y,w:P.w,h:P.h},{x:E.x,y:E.y,w:E.w,h:E.h})) hitPlayer(1);
   });
 
-  for(let i=L.coins.length-1;i>=0;i--){ const C=L.coins[i]; if(AABB({x:P.x,y:P.y,w:P.w,h:P.h},{x:C.x-8,y:C.y-8,w:16,h:16})){ L.coins.splice(i,1); P.coins++; beep(880,.04); } }
+  // coins
+  for(let i=L.coins.length-1;i>=0;i--){
+    const C=L.coins[i];
+    if(AABB({x:P.x,y:P.y,w:P.w,h:P.h},{x:C.x-8,y:C.y-8,w:16,h:16})){
+      L.coins.splice(i,1); P.coins++; beep(880,.04);
+    }
+  }
+
+  // portal
   if(AABB({x:P.x,y:P.y,w:P.w,h:P.h}, L.portal)) winLevel();
 
-  const cw=window._CW||innerWidth; cam.x += ((P.x - cw*.38) - cam.x)*.12; cam.x=clamp(cam.x,0,L.width-cw); cam.y=0;
+  // camera (smooth follow)
+  const cw = window._CW || innerWidth;
+  const targetX = clamp(P.x - cw * CAM_OFFSET, 0, L.width - cw);
+  cam.x += (targetX - cam.x) * CAM_LERP;
+  cam.y = 0;
+
   setHUD();
 }
 
+/* ---------- loop / boot ---------- */
 function togglePause(){ if(!running){ document.getElementById('pauseDlg').classList.add('hidden'); running=true; } else { document.getElementById('pauseDlg').classList.remove('hidden'); running=false; } }
 
 (function boot(){
   const c=document.getElementById('game'), g=c.getContext('2d');
   const chip=document.getElementById('chip'), perfBtn=document.getElementById('perf'), pauseBtn=document.getElementById('pause'), resume=document.getElementById('resume');
-  function resize(){ window._CW=c.width=innerWidth*(devicePixelRatio||1); window._CH=c.height=innerHeight*(devicePixelRatio||1); c.style.width=innerWidth+'px'; c.style.height=innerHeight+'px'; }
+
+  function resize(){
+    window._CW=c.width=innerWidth*(devicePixelRatio||1);
+    window._CH=c.height=innerHeight*(devicePixelRatio||1);
+    c.style.width=innerWidth+'px'; c.style.height=innerHeight+'px';
+  }
   resize(); addEventListener('resize',resize);
+
   if (createInput(c)) enableTouchControls();
-  L=buildLevel();// Spawn player on the ground near the start
-P.x = 80;
-P.y = L.groundY - P.h - 2;
-// Center camera on player at start
-cam.x += ( (P.x - (innerWidth * CAM_OFFSET)) - cam.x ) * CAM_LERP;
-cam.y = 0;
- running=true;
+
+  L=buildLevel();
+
+  // Spawn player on the ground near the start
+  P.x = 80;
+  P.y = L.groundY - P.h - 2;
+
+  // Center camera on player at start (no lerp on first frame)
+  cam.x = Math.max(0, P.x - (innerWidth * CAM_OFFSET));
+  cam.y = 0;
+
+  running=true;
+
   let last=performance.now(), fpsF=0,fps=0,t=0;
-  function frame(now){ const dt=Math.min(50,now-last)/1000; last=now; if(running) update(dt); if(!lowPerf || (lowPerf && (fpsF%2===0))) drawLevel(g,c,L,now/1000); fpsF++; t+=dt; if(t>=1){fps=fpsF;fpsF=0;t=0;} chip.textContent=`FPS: ${fps} | enemies: ${L.enemies.length}`; requestAnimationFrame(frame); }
+  function frame(now){
+    const dt=Math.min(50,now-last)/1000; last=now;
+    if(running) update(dt);
+
+    if(!lowPerf || (lowPerf && (fpsF%2===0))) drawLevel(g,c,L,now/1000);
+
+    fpsF++; t+=dt; if(t>=1){fps=fpsF;fpsF=0;t=0;}
+    chip.textContent=`FPS: ${fps} | enemies: ${L.enemies.length}`;
+    requestAnimationFrame(frame);
+  }
   requestAnimationFrame(frame);
+
   perfBtn.onclick=()=>{ lowPerf=!lowPerf; perfBtn.textContent='Low-Perf: '+(lowPerf?'ON':'OFF'); };
   pauseBtn.onclick=togglePause; resume.onclick=togglePause;
 })();
 
+/* ---------- start flow (Play / Continue) ---------- */
 document.addEventListener('DOMContentLoaded', function(){
   const canvas=document.getElementById('game'), overlay=document.getElementById('start');
   const playBtn=document.getElementById('new'), contBtn=document.getElementById('cont');
   const againW=document.getElementById('playAgainWin'), againL=document.getElementById('playAgainLose');
+
   canvas.setAttribute('tabindex','0');
+
   let audioUnlocked=false;
-  function unlockAudioOnce(){ if(audioUnlocked) return; const AC=window.AudioContext||window.webkitAudioContext; if(AC){ if(!window._ac) window._ac=new AC(); if(window._ac.state==='suspended'){ try{ window._ac.resume(); }catch(_){}}} audioUnlocked=true; }
-  function startFromUI(){ unlockAudioOnce(); overlay.classList.add('hidden'); overlay.style.display='none'; try{ canvas.focus(); }catch(_){} }
+  function unlockAudioOnce(){
+    if(audioUnlocked) return;
+    const AC=window.AudioContext||window.webkitAudioContext;
+    if(AC){
+      if(!window._ac) window._ac=new AC();
+      if(window._ac.state==='suspended'){ try{ window._ac.resume(); }catch(_){ } }
+    }
+    audioUnlocked=true;
+  }
+
+  function startFromUI(){
+    unlockAudioOnce();
+    overlay.classList.add('hidden');
+    overlay.style.display='none';
+    try{ canvas.focus(); }catch(_){}
+  }
+
   playBtn.addEventListener('click', startFromUI, true);
   contBtn.addEventListener('click', startFromUI, true);
   againW.addEventListener('click', ()=>location.reload());
