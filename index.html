@@ -395,63 +395,61 @@ function drawLevel(g,c,L,t){
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
-/* Minimal, safe start/focus/audio unlock */
+<script>
+/* Play button start + focus + audio unlock */
 document.addEventListener('DOMContentLoaded', function () {
-  var c = document.getElementById('game');
+  var canvas   = document.getElementById('game');
+  var overlay  = document.getElementById('start');     // the start screen
+  var playBtn  = document.getElementById('new');       // "Play" button
+  var contBtn  = document.getElementById('cont');      // "Continue" button
 
-  // Make canvas focusable + focus now and on click
-  if (c) {
-    c.setAttribute('tabindex', '0');
-    try { c.focus(); } catch (e) {}
-    c.addEventListener('click', function () {
-      try { c.focus(); } catch (e) {}
-    });
-  }
+  // Make canvas focusable
+  if (canvas) canvas.setAttribute('tabindex','0');
 
-  // Unlock AudioContext on first gesture (Safari/Chrome policy)
+  // One-time audio unlock
   var audioUnlocked = false;
-  function unlockAudioOnce() {
+  function unlockAudioOnce () {
     if (audioUnlocked) return;
     var ACtx = window.AudioContext || window.webkitAudioContext;
     if (ACtx) {
       if (!window._gameAudioCtx) window._gameAudioCtx = new ACtx();
       if (window._gameAudioCtx.state === 'suspended') {
-        try { window._gameAudioCtx.resume(); } catch (e) {}
+        try { window._gameAudioCtx.resume(); } catch(e) {}
       }
     }
     audioUnlocked = true;
   }
 
-  function startGame() {
+  function startFromUI () {
     unlockAudioOnce();
-    if (c) { try { c.focus(); } catch (e) {} }
 
-    // Hide start/pause overlays if present
-    var start = document.getElementById('start');
-    if (start && start.classList) { start.classList.add('hidden'); }
-    var pause = document.getElementById('pauseDlg') || document.getElementById('pause');
-    if (pause && pause.classList) { pause.classList.add('hidden'); }
-
-    // Nudge engines that listen for Enter to start
-    setTimeout(function () {
-      try { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' })); } catch (e) {}
-    }, 10);
-  }
-
-  // Wire Play/Continue buttons
-  var btns = document.getElementsByTagName('button');
-  for (var i = 0; i < btns.length; i++) {
-    var t = (btns[i].textContent || '').toLowerCase().trim();
-    if (t === 'play' || t === 'continue') {
-      btns[i].addEventListener('click', startGame, true);
+    // Hide overlay (by class or hard display none)
+    if (overlay) {
+      if (overlay.classList) overlay.classList.add('hidden');
+      overlay.style.display = 'none';
     }
+
+    // Focus canvas so keys work
+    if (canvas) { try { canvas.focus(); } catch(e){} }
+
+    // If your engine exposes startGame(), call it; otherwise send Enter
+    try { if (typeof startGame === 'function') { startGame(); return; } } catch(e){}
+    try { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' })); } catch(e){}
   }
 
-  // Also allow any first click/key to start (mobile/desktop)
-  window.addEventListener('pointerdown', startGame, { once: true });
-  window.addEventListener('keydown', startGame, { once: true });
-});
+  // Bind explicit buttons
+  if (playBtn) playBtn.addEventListener('click', startFromUI, true);
+  if (contBtn) contBtn.addEventListener('click', startFromUI, true);
 
+  // Fallback: if markup changes, bind any visible button labeled Play/Continue
+  Array.from(document.querySelectorAll('button, [role="button"]')).forEach(function (el) {
+    var t = (el.textContent || '').trim().toLowerCase();
+    if (t === 'play' || t === 'continue') el.addEventListener('click', startFromUI, true);
+  });
+
+  // Keep canvas focused when clicked
+  if (canvas) canvas.addEventListener('click', function(){ try { canvas.focus(); } catch(e){} });
+});
 </script>
 </body>
 </html>
