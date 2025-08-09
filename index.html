@@ -1,4 +1,4 @@
-<!doctype html>
+ <!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
@@ -111,11 +111,11 @@ function pollGamepad(keys){
   if(!gp||!gp.connected) return;
   const b=gp.buttons, ax=gp.axes, dead=.25, LX=(Math.abs(ax[0])>dead)?ax[0]:0;
   keys['a']=LX<-dead; keys['d']=LX>dead;
-  keys[' ']=b[0]?.pressed; // A
+  keys[' ']=b[0]?.pressed;           // A
   keys['j']=b[1]?.pressed||b[2]?.pressed; // B/X
-  keys['shift']=b[3]?.pressed; // Y
-  keys['q']=b[4]?.pressed; // LB
-  keys['e']=b[5]?.pressed; // RB
+  keys['shift']=b[3]?.pressed;       // Y
+  keys['q']=b[4]?.pressed;           // LB
+  keys['e']=b[5]?.pressed;           // RB
   keys['r']=(b[6]?.pressed||b[7]?.pressed); // Back/Start
 }
 
@@ -131,12 +131,14 @@ const cam={x:0,shake:0};
 /* ========= Level (Misty Bamboo Dojo) ========= */
 function buildLevel(c){
   const solids=[],plats=[],enemies=[],loot=[];
-  const GH=c.height*0.82, W=6800;
+  // Use CSS height, not device pixels (fixes off-screen spawn)
+  const GH = ((window.__CH || (c.height/(window.__DPR||1)))) * 0.82;
+  const W=6800;
   const addS=(x,y,w,h)=>solids.push({x,y,w,h});
   const addP=(x,y,w,h)=>plats.push({x,y,w,h});
   addS(-600,GH,W+1200,900);
   for(let i=0;i<18;i++){const px=320+i*320, py=GH-(140+Math.random()*320), pw=180+Math.random()*160;addP(px,py,pw,24)}
-  for(let i=0;i<12;i++){enemies.push({x:620+i*360,y:120+Math.random()*80,w:44,h:44,vx:0,vy:0,t:0,type:i%3?'ronin':'monk',hp:3})}
+  for(let i=0;i<12;i++){enemies.push({x:620+i*360,y:120+Math.random()*80,w:44,h:44,vx:0,vy:0,t:0,type=i%3?'ronin':'monk',hp:3})}
   const portal={x:W-520,y:GH-140,w:64,h:128};
   return {solids,plats,enemies,loot,portal,width:W,groundY:GH};
 }
@@ -151,7 +153,7 @@ function applyLoot(t){
   else if(t==='slow'){window.__slow={active:true,t:0,dur:260}}
   sfx.power();
 }
-// Supers (Q/E/R)
+// Supers
 function castVoidStep(){ P.x+=P.face*120; cam.shake=4; sfx.tp(); }
 function castSpectralBlades(){ P.blades.push({t:0,life:540}); sfx.power(); }
 function castKineticGuard(){ P.guardT=180; sfx.guard(); }
@@ -159,25 +161,29 @@ function castKineticGuard(){ P.guardT=180; sfx.guard(); }
 /* ========= Engine ========= */
 function updatePlayer(L,keys,dt){
   const left=keys['a']||keys['arrowleft'], right=keys['d']||keys['arrowright'], jump=keys[' '], dash=keys['shift'];
-  // Supers (one-shot on press)
   if(keys['q']){ keys['q']=false; castVoidStep(); }
   if(keys['e']){ keys['e']=false; castSpectralBlades(); }
   if(keys['r']){ keys['r']=false; castKineticGuard(); }
 
   window.__slow=window.__slow||{active:false,t:0,dur:0};
   if(window.__slow.active){ window.__slow.t++; if(window.__slow.t>window.__slow.dur) window.__slow.active=false; }
+
   const acc=P.on?MOVE.RUN_ACCEL:MOVE.AIR_ACCEL;
   const max=P.runT>=MOVE.SPRINT_TIME?MOVE.SPRINT_SPEED:MOVE.MAX_SPEED;
   if(left) P.vx-=acc*dt; if(right) P.vx+=acc*dt;
   if(!left && !right && P.on){ const s=Math.sign(P.vx); const mag=Math.max(0,Math.abs(P.vx)-MOVE.RUN_DECEL*dt); P.vx=mag*s; if(Math.abs(P.vx)<2) P.vx=0; }
   P.vx=clamp(P.vx,-max,max); P.face=right?1:(left?-1:P.face);
+
   if((left||right)&&P.on) P.runT+=dt; else P.runT=Math.max(0,P.runT-dt*2);
+
   P.coy=Math.max(0,(P.on?MOVE.COYOTE:P.coy-1));
   if(jump) P.buf=MOVE.JUMP_BUF; else P.buf=Math.max(0,P.buf-1);
   if((P.coy>0||P.jumps<P.maxJ)&&P.buf>0){ P.vy=MOVE.JUMP_V(MOVE.GRAVITY); P.on=false; P.jumps++; P.buf=0; sfx.jump(); }
   if(!jump && P.vy<0) P.vy += MOVE.GRAVITY*(MOVE.SHORT_HOP-1)*dt;
+
   if(dash && P.dashCd<=0){ P.vx += P.face*(MOVE.DASH + (P.runT>=MOVE.SPRINT_TIME?MOVE.DASH_BONUS:0)); P.vy -= 60; P.dashCd = 0.5/dt; cam.shake=5; sfx.dash(); }
   P.dashCd=Math.max(0,P.dashCd-1);
+
   P.vy += MOVE.GRAVITY * (P.vy>0?MOVE.FALL_MULT:1) * dt;
   P.x += P.vx*dt; P.y += P.vy*dt;
 
@@ -207,12 +213,11 @@ function updateAI(L,keys,dt){
 
   for(let i=L.enemies.length-1;i>=0;i--){
     const E=L.enemies[i]; E.t++;
-    // Simple behaviors
     if(E.type==='ronin'){ E.vx += Math.sign(P.x-E.x)*28*dt; }
     else { const ang=Math.atan2(P.y-E.y,P.x-E.x); E.vx+=Math.cos(ang)*22*dt; E.vy+=Math.sin(ang)*22*dt; }
-    E.vx=clamp(E.vx,-160,160); E.vy+=MOVE.GRAVITY*0.55*dt;
+    E.vx=clamp(E.vx,-160,160); E.vy += MOVE.GRAVITY*0.55*dt;
     E.x+=E.vx*dt; E.y+=E.vy*dt;
-    // collide with solids
+
     for(const r of all){
       const er={x:E.x,y:E.y,w:E.w,h:E.h}; if(!AABB(er,r)) continue;
       if(er.y+E.h-r.y<24){E.y=r.y-E.h;E.vy=0}else{ if(er.x<r.x)E.x=r.x-E.w; else E.x=r.x+r.w; E.vx*=-.4; }
@@ -242,7 +247,7 @@ function updateAI(L,keys,dt){
     }
   }
 
-  // Loot collect & portal
+  // Loot & portal
   for(let i=L.loot.length-1;i>=0;i--){
     const M=L.loot[i]; M.life--; M.vy+=900*dt; M.y+=M.vy*dt;
     if(M.life<=0){L.loot.splice(i,1); continue;}
@@ -257,15 +262,19 @@ function painterSky(g,cw,ch,t){
   const grd=g.createLinearGradient(0,0,0,ch);
   grd.addColorStop(0,'#0f1d2a'); grd.addColorStop(1,'#16344e');
   g.fillStyle=grd; g.fillRect(0,0,cw,ch);
-  // wispy mist
+  // mist
   g.globalAlpha=.08; for(let i=0;i<12;i++){ g.beginPath(); g.ellipse((t*12+i*180)%(cw+800)-400, 180+i*28, 260, 46, 0.2, 0, Math.PI*2); g.fillStyle='#fff'; g.fill(); }
   g.globalAlpha=1;
-  // far ground
   g.fillStyle='rgba(21,40,26,.9)'; g.fillRect(0, ch*.78, cw, ch*.22);
 }
+
 function drawLevel(g,c,L,t){
-  const cw=c.width, ch=c.height;
+  // Use CSS size (fixes layout)
+  const cw = window.__CW || (c.width/(window.__DPR||1));
+  const ch = window.__CH || (c.height/(window.__DPR||1));
+
   painterSky(g,cw,ch,t);
+
   // bamboo parallax
   g.save(); g.globalAlpha=.22; g.fillStyle='#2a5c39';
   for(let i=0;i<60;i++){ const x=(i*180 - (t*60)%1800)%(cw+200)-100; g.fillRect(x, ch*.76 - (i%5)*10, 12, 220); }
@@ -287,7 +296,6 @@ function drawLevel(g,c,L,t){
     g.globalAlpha=.25; g.fillStyle='#000'; g.beginPath(); g.ellipse(0,22,18,6,0,0,Math.PI*2); g.fill();
     g.globalAlpha=1; g.fillStyle=E.type==='ronin'?'#f78c6b':'#ef476f';
     rr(g,-22,-22,44,44,12); g.fill();
-    // eyes (rim-style)
     g.globalAlpha=.22; g.fillStyle='#000'; g.beginPath(); g.arc(-8,-8,4,0,Math.PI*2); g.arc(8,-8,4,0,Math.PI*2); g.fill();
     g.globalAlpha=1; g.restore();
   });
@@ -300,12 +308,9 @@ function drawLevel(g,c,L,t){
 
   // player
   const x=P.x-cam.x, y=P.y, w=P.w, h=P.h;
-  // shadow
   g.globalAlpha=.35; g.fillStyle='#000'; g.beginPath(); g.ellipse(x+w/2, y+h-4, 14, 6, 0,0,Math.PI*2); g.fill(); g.globalAlpha=1;
-  // body + face
-  g.fillStyle='rgba(15,15,18,.95)'; g.beginPath(); g.ellipse(x+w/2,y*h?y+h/2-6:y,18,24,0,0,Math.PI*2); g.fill();
+  g.fillStyle='rgba(15,15,18,.95)'; g.beginPath(); g.ellipse(x+w/2,y+h/2-6,18,24,0,0,Math.PI*2); g.fill();
   g.fillStyle='#fff'; g.beginPath(); g.arc(x+w/2-6,y+h/2-12,2.4,0,Math.PI*2); g.arc(x+w/2+6,y+h/2-12,2.4,0,Math.PI*2); g.fill();
-  // rim light
   g.fillStyle='rgba(102,252,241,.35)'; g.fillRect(x+w-8, y+h/2-18, 5, 32);
 
   // spectral blades
@@ -327,8 +332,17 @@ function drawLevel(g,c,L,t){
   const chip=document.getElementById('chip'), start=document.getElementById('start'), cont=document.getElementById('cont'), newBtn=document.getElementById('new');
   const pauseDlg=document.getElementById('pauseDlg'), resume=document.getElementById('resume');
   const perfBtn=document.getElementById('perf'), pauseBtn=document.getElementById('pause');
+
   let DPR=1;
-  function resize(){DPR=Math.min(('ontouchstart'in window||navigator.maxTouchPoints>0)?1.25:2,window.devicePixelRatio||1);const W=innerWidth|0,H=innerHeight|0;c.width=(W*DPR)|0;c.height=(H*DPR)|0;c.style.width=W+'px';c.style.height=H+'px';g.setTransform(DPR,0,0,DPR,0,0)}
+  function resize(){
+    DPR=Math.min(('ontouchstart'in window||navigator.maxTouchPoints>0)?1.25:2,window.devicePixelRatio||1);
+    const W=innerWidth|0, H=innerHeight|0;
+    c.width=(W*DPR)|0; c.height=(H*DPR)|0;
+    c.style.width=W+'px'; c.style.height=H+'px';
+    g.setTransform(DPR,0,0,DPR,0,0);
+    // remember CSS size + DPR globally (fixes layout)
+    window.__DPR=DPR; window.__CW=W; window.__CH=H;
+  }
   resize(); addEventListener('resize',resize,{passive:true});
 
   const keys=createInput(c);
@@ -348,7 +362,7 @@ function drawLevel(g,c,L,t){
   // Perf
   perfBtn.onclick=()=>{ perfBtn.textContent = perfBtn.textContent.includes('OFF')?'Low-Perf: ON':'Low-Perf: OFF'; };
 
-  // HUD bits
+  // HUD
   const auraEl=document.getElementById('aura');
   function renderAura(){ auraEl.innerHTML=''; const n=Math.round(P.aura/20); for(let i=0;i<5;i++){ const d=document.createElement('div'); d.className='auraDot'+(i<n?' on':''); auraEl.appendChild(d); } }
   renderAura();
@@ -361,13 +375,19 @@ function drawLevel(g,c,L,t){
   function frame(now){
     const dt=Math.min(50,now-last)/1000; last=now;
     pollGamepad(keys);
+
     if(start.classList.contains('hidden') && pauseDlg.classList.contains('hidden')){
       updatePlayer(L,keys,dt);
       const progressed=updateAI(L,keys,dt);
-      const target=Math.max(0, Math.min(L.width - c.width, P.x - c.width*0.38));
+
+      // camera uses CSS width
+      const cw = window.__CW || (c.width/(window.__DPR||1));
+      const target=Math.max(0, Math.min(L.width - cw, P.x - cw*0.38));
       cam.x += (target - cam.x) * 0.18;
+
       if(progressed){ L=buildLevel(c); write({score:(window.__score||0), aura:P.aura}); }
     }
+
     drawLevel(g,c,L, performance.now()/1000);
     chip.textContent=`Rai Kaisen • Score ${window.__score||0}`;
     renderAura();
@@ -375,7 +395,6 @@ function drawLevel(g,c,L,t){
   }
   requestAnimationFrame(frame);
 
-  // Focus helpers
   window.addEventListener('keydown', ()=>c.focus(), {once:true});
   window.addEventListener('pointerdown', ()=>c.focus(), {once:true});
 })();
