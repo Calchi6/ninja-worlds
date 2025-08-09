@@ -139,7 +139,7 @@ function buildLevel(c){
   const addP=(x,y,w,h)=>plats.push({x,y,w,h});
   addS(-600,GH,W+1200,900);
   for(let i=0;i<18;i++){const px=320+i*320, py=GH-(140+Math.random()*320), pw=180+Math.random()*160;addP(px,py,pw,24)}
-  for(let i=0;i<12;i++){enemies.push({x:620+i*360,y:120+Math.random()*80,w:44,h:44,vx:0,vy:0,t:0,type=i%3?'ronin':'monk',hp:3})}
+  for(let i=0;i<12;i++){enemies.push({x:620+i*360,y:120+Math.random()*80,w:44,h:44,vx:0,vy:0,t:0,type: (i % 3 ? 'ronin' : 'monk') ,hp:3})}
   const portal={x:W-520,y:GH-140,w:64,h:128};
   return {solids,plats,enemies,loot,portal,width:W,groundY:GH};
 }
@@ -396,17 +396,17 @@ function drawLevel(g,c,L,t){
   }
   requestAnimationFrame(frame);
 <script>
-/* Play button start + focus + audio unlock */
+/* Play button start + focus + audio unlock + debug chip */
 document.addEventListener('DOMContentLoaded', function () {
-  var canvas   = document.getElementById('game');
-  var overlay  = document.getElementById('start');     // the start screen
-  var playBtn  = document.getElementById('new');       // "Play" button
-  var contBtn  = document.getElementById('cont');      // "Continue" button
+  var canvas  = document.getElementById('game');
+  var overlay = document.getElementById('start');
+  var playBtn = document.getElementById('new');
+  var contBtn = document.getElementById('cont');
 
-  // Make canvas focusable
+  // canvas focusable
   if (canvas) canvas.setAttribute('tabindex','0');
 
-  // One-time audio unlock
+  // one-time audio unlock
   var audioUnlocked = false;
   function unlockAudioOnce () {
     if (audioUnlocked) return;
@@ -414,41 +414,65 @@ document.addEventListener('DOMContentLoaded', function () {
     if (ACtx) {
       if (!window._gameAudioCtx) window._gameAudioCtx = new ACtx();
       if (window._gameAudioCtx.state === 'suspended') {
-        try { window._gameAudioCtx.resume(); } catch(e) {}
+        try { window._gameAudioCtx.resume(); } catch(e){}
       }
     }
     audioUnlocked = true;
   }
 
+  // unified start
   function startFromUI () {
     unlockAudioOnce();
 
-    // Hide overlay (by class or hard display none)
+    // hide overlay
     if (overlay) {
       if (overlay.classList) overlay.classList.add('hidden');
       overlay.style.display = 'none';
     }
 
-    // Focus canvas so keys work
+    // focus canvas so keys work
     if (canvas) { try { canvas.focus(); } catch(e){} }
 
-    // If your engine exposes startGame(), call it; otherwise send Enter
-    try { if (typeof startGame === 'function') { startGame(); return; } } catch(e){}
+    // if engine exposes startGame(), use it; else nudge with Enter
+    try { if (typeof startGame === 'function') { startGame(); } } catch(e){}
     try { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' })); } catch(e){}
   }
 
-  // Bind explicit buttons
+  // bind explicit buttons
   if (playBtn) playBtn.addEventListener('click', startFromUI, true);
   if (contBtn) contBtn.addEventListener('click', startFromUI, true);
 
-  // Fallback: if markup changes, bind any visible button labeled Play/Continue
+  // fallback: any element labeled Play/Continue
   Array.from(document.querySelectorAll('button, [role="button"]')).forEach(function (el) {
     var t = (el.textContent || '').trim().toLowerCase();
     if (t === 'play' || t === 'continue') el.addEventListener('click', startFromUI, true);
   });
 
-  // Keep canvas focused when clicked
+  // keep canvas focused when clicked
   if (canvas) canvas.addEventListener('click', function(){ try { canvas.focus(); } catch(e){} });
+
+  // start on first user gesture (mobile/desktop)
+  window.addEventListener('pointerdown', startFromUI, { once:true });
+  window.addEventListener('keydown',     startFromUI, { once:true });
+
+  /* --- tiny debug chip: shows FPS and enemy count --- */
+  (function () {
+    var chip = document.createElement('div');
+    chip.style.cssText = 'position:fixed;top:10px;left:10px;padding:6px 10px;border-radius:8px;font:12px/1.2 -apple-system,system-ui,Segoe UI,Inter,sans-serif;background:rgba(0,0,0,.6);color:#fff;z-index:9999;pointer-events:none';
+    chip.textContent = 'booting…';
+    document.body.appendChild(chip);
+
+    var last = performance.now(), frames = 0, fps = 0;
+    function loop() {
+      var now = performance.now();
+      frames++;
+      if (now - last >= 1000) { fps = frames; frames = 0; last = now; }
+      var enemyCount = (window.L && L.enemies) ? L.enemies.length : 0;
+      chip.textContent = 'FPS: ' + fps + ' | enemies: ' + enemyCount;
+      requestAnimationFrame(loop);
+    }
+    requestAnimationFrame(loop);
+  })();
 });
 </script>
 </body>
