@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no"/>
-<title>Ninja Worlds — v0.7 (Playable + Touch)</title>
+<title>Ninja Worlds — v0.8 (Upgraded)</title>
 <meta name="theme-color" content="#0b0d12">
 <style>
   :root{--ui:rgba(255,255,255,.92);--ink:#0b0d12}
@@ -17,10 +17,10 @@
   .btn{pointer-events:auto;border:0;border-radius:10px;padding:10px 14px;font-weight:800;background:var(--ui);color:#000;min-width:86px}
 
   /* Dialogs */
-  .dialog{position:fixed;inset:0;background:rgba(10,12,16,.4);backdrop-filter:blur(6px);display:grid;place-items:center}
-  .panel{background:rgba(20,22,28,.86);border:1px solid rgba(255,255,255,.15);padding:18px 20px;border-radius:12px;min-width:260px}
+  .dialog{position:fixed;inset:0;background:rgba(10,12,16,.42);backdrop-filter:blur(6px);display:grid;place-items:center}
+  .panel{background:rgba(20,22,28,.9);border:1px solid rgba(255,255,255,.15);padding:18px 20px;border-radius:12px;min-width:260px}
   .panel h2{margin:.2em 0 8px;font:700 18px system-ui}
-  .panel p{opacity:.8;margin:.2em 0 10px}
+  .panel p{opacity:.85;margin:.2em 0 10px}
   .hidden{display:none}
 
   /* Touch controls */
@@ -35,7 +35,7 @@
 </head>
 <body>
 
-<canvas id="game" aria-label="Ninja Worlds v0.7"></canvas>
+<canvas id="game" aria-label="Ninja Worlds v0.8"></canvas>
 
 <!-- HUD -->
 <div id="hud">
@@ -68,8 +68,8 @@
 <!-- START -->
 <div id="start" class="dialog">
   <div class="panel">
-    <h2>Ninja Worlds — v0.7 Slice</h2>
-    <p>Move: WASD / Arrows · Jump: Space · Dash: Shift · Attack: J · Supers: Q / E</p>
+    <h2>Ninja Worlds — v0.8</h2>
+    <p>Move: WASD / Arrows · Jump: Space · Dash: Shift · Attack: J · Pause: P</p>
     <div style="display:flex;gap:8px">
       <button id="new"  class="btn">Play</button>
       <button id="cont" class="btn" disabled>Continue</button>
@@ -101,7 +101,7 @@
 </div>
 
 <script>
-/* ===== NINJA WORLDS — one-file playable slice (with touch) ===== */
+/* ===== NINJA WORLDS — Upgraded one-file build ===== */
 
 /* ---------- helpers ---------- */
 function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
@@ -123,16 +123,25 @@ function beep(freq=880, dur=0.08){
 /* ---------- globals ---------- */
 let L=null; // level object
 const P = {x:100,y:220,w:28,h:40,vx:0,vy:0,face:1,on:false,jumps:0,maxJ:1,dashCd:0,
-           hp:3,iFrames:0,coins:0};
+           hp:3,iFrames:0,coins:0,_wasOn:false};
 const cam = {x:0,y:0,shake:0};
 const MOVE = {RUN:260, AIR_ACCEL:1100, RUN_DECEL:2400, JUMP_V:420, GRAV:980};
 let running = false, lowPerf=false;
+
+// jump feel
+let COYOTE = 0, JBUF = 0;
+const COYOTE_TIME = 0.08, JUMP_BUF = 0.10;
 
 /* ---------- input ---------- */
 const keys = Object.create(null);
 function createInput(canvas){
   const touch = 'ontouchstart' in window || navigator.maxTouchPoints>0;
-  window.addEventListener('keydown', e=>{ keys[e.key.toLowerCase()] = true; if(e.key===' ') e.preventDefault(); });
+  window.addEventListener('keydown', e=>{
+    const k = e.key.toLowerCase();
+    keys[k] = true;
+    if(e.key===' ') e.preventDefault();
+    if(k==='p'){ togglePause(); }
+  });
   window.addEventListener('keyup',   e=>{ keys[e.key.toLowerCase()] = false; });
   canvas.addEventListener('pointerdown', ()=>canvas.focus());
   return touch;
@@ -156,7 +165,7 @@ function enableTouchControls(){
     ()=>{ keys['arrowleft']=keys['a']=true; },
     ()=>{ keys['arrowleft']=keys['a']=false; });
 
-  bindHold(document.getElementById('tRight'),
+  bindHold(document.getElementById('tRight'],
     ()=>{ keys['arrowright']=keys['d']=true; },
     ()=>{ keys['arrowright']=keys['d']=false; });
 
@@ -176,26 +185,27 @@ function enableTouchControls(){
 /* ---------- level ---------- */
 function buildLevel(){
   const solids=[], enemies=[], coins=[];
-  const W = 2400, GH = (window._CH || (innerHeight/ (window.devicePixelRatio||1))) * .82;
+  const W = 2600, GH = (window._CH || (innerHeight/ (window.devicePixelRatio||1))) * .82;
 
   function addS(x,y,w,h){ solids.push({x,y,w,h}); }
   function addCoin(x,y){ coins.push({x,y,w:18,h:18,t:0}); }
 
   // floor + platforms
-  addS(0, GH, W, 20);
+  addS(0, GH, W, 22);
   addS(160, GH-120, 220, 18);
   addS(520, GH-200, 260, 18);
   addS(940, GH-140, 200, 18);
   addS(1320, GH-220, 260, 18);
   addS(1780, GH-140, 200, 18);
+  addS(2100, GH-200, 220, 18);
 
   // coins
-  for(let i=0;i<8;i++) addCoin(240 + i*180, GH-160 + (i&1?-30:0));
+  for(let i=0;i<10;i++) addCoin(240 + i*180, GH-160 + (i&1?-30:0));
 
   // enemies (patrol + light chase)
-  for(let i=0;i<3;i++){
+  for(let i=0;i<4;i++){
     enemies.push({x:620+i*360, y:GH-64, w:44, h:44, vx:0, vy:0, t:0,
-                  type:(i%3?'ronin':'monk'), hp:2});
+                  type:(i%2?'ronin':'monk'), hp:2});
   }
 
   // portal (win)
@@ -239,7 +249,13 @@ function drawLevel(g,c,l,now){
   g.fillStyle=grd; g.fillRect(PRTL.x-cam.x, PRTL.y-cam.y, PRTL.w, PRTL.h);
   g.restore();
 
-  // player (simple rectangle + aura when i-frames)
+  // slash flash
+  if (slashTimer>0) {
+    g.fillStyle='rgba(255,255,255,.22)';
+    const r = attackHitbox(); g.fillRect(r.x-cam.x, r.y-cam.y, r.w, r.h);
+  }
+
+  // player (aura when i-frames)
   if(P.iFrames>0){ g.save(); g.globalAlpha=.35; g.fillStyle='#a0e8ff';
     g.fillRect(P.x-cam.x-6,P.y-cam.y-6,P.w+12,P.h+12); g.restore(); }
   g.fillStyle='#e6eef7';
@@ -279,7 +295,6 @@ function winLevel(){
 
 /* ---------- physics + update ---------- */
 function resolveCollisions(box, solids){
-  // simple AABB resolution for ground platforms
   for(const s of solids){
     if(!AABB(box, s)) continue;
     const dx1 = (s.x + s.w) - box.x;
@@ -293,14 +308,31 @@ function resolveCollisions(box, solids){
       box.y += (dy1 < dy2 ? dy1 : -dy2);
       if(dy1 < dy2){ // landed on top
         P.on = true; P.vy = 0; P.jumps = 0;
-      }else{ // hit ceiling
+        if (!P._wasOn){ cam.shake = 3; beep(180,.03); }
+      }else{
         if(P.vy < 0) P.vy = 0;
       }
     }
   }
 }
 
+/* attack hitbox */
+function attackHitbox(){
+  const w=34,h=28, ox = P.face>0 ? P.w : -w;
+  return {x:P.x+ox, y:P.y+(P.h-h)/2, w, h};
+}
+let slashTimer = 0;
+
 function update(dt){
+  // remember last grounded state
+  P._wasOn = P.on;
+
+  // timers
+  COYOTE = Math.max(0, P.on ? COYOTE_TIME : COYOTE - dt);
+  JBUF   = Math.max(0, JBUF - dt);
+  P.iFrames = Math.max(0, P.iFrames - dt);
+  slashTimer = Math.max(0, slashTimer - dt);
+
   // input
   const left  = keys['a']||keys['arrowleft'];
   const right = keys['d']||keys['arrowright'];
@@ -308,27 +340,46 @@ function update(dt){
   const dash  = keys['shift'];
   const atk   = keys['j'];
 
+  // buffer jump input
+  if (jump && JBUF<=0) JBUF = JUMP_BUF;
+
   // horizontal
   const ax = (right?1:0) - (left?1:0);
   P.vx += ax * (P.on? MOVE.RUN*10 : MOVE.AIR_ACCEL) * dt;
   const maxV = MOVE.RUN;
   P.vx = clamp(P.vx, -maxV, maxV);
-  if(ax===0 && P.on){ // friction
+  if(ax===0 && P.on){
     const stop = Math.sign(P.vx) * Math.min(Math.abs(P.vx), MOVE.RUN_DECEL*dt);
     P.vx -= stop;
   }
   if(right) P.face = 1; if(left) P.face = -1;
 
-  // jump
-  if(jump && (P.on || P.jumps < P.maxJ)){
-    P.vy = -MOVE.JUMP_V; P.on=false; P.jumps++; keys[' ']=keys['space']=false; beep(660,.06);
+  // jump (consume buffer if allowed)
+  if (JBUF>0 && (COYOTE>0 || P.jumps<P.maxJ)) {
+    P.vy = -MOVE.JUMP_V; P.on=false; P.jumps++; JBUF=0;
+    keys[' ']=keys['space']=false; beep(660,.06);
   }
+  // variable jump height
+  if ((!keys[' '] && !keys['space']) && P.vy < -120) P.vy = -120;
 
-  // dash (simple burst)
+  // dash
   if(dash && P.dashCd<=0){
     P.vx += 360 * P.face; P.dashCd = .35; beep(440,.05);
   }
   P.dashCd = Math.max(0, P.dashCd - dt);
+
+  // attack
+  if (atk){
+    const hit = attackHitbox();
+    for (let i=L.enemies.length-1;i>=0;i--){
+      const E = L.enemies[i];
+      if (AABB(hit, {x:E.x,y:E.y,w:E.w,h:E.h})) {
+        L.enemies.splice(i,1); beep(520,.07); cam.shake = 5;
+      }
+    }
+    slashTimer = 0.12;
+    keys['j'] = false;
+  }
 
   // gravity
   P.vy += MOVE.GRAV * dt;
@@ -339,9 +390,9 @@ function update(dt){
   P.on = false;
   resolveCollisions({x:P.x,y:P.y,w:P.w,h:P.h}, L.solids);
 
-  // keep in bounds
+  // keep in bounds / death pit
   P.x = clamp(P.x, 0, L.width-P.w);
-  if(P.y > L.groundY + 400){ hitPlayer(3); } // fell off = lose
+  if(P.y > L.groundY + 400){ hitPlayer(3); }
 
   // enemies AI
   L.enemies.forEach(E=>{
@@ -352,7 +403,7 @@ function update(dt){
     E.vx = (patrol + chase) * dt * 6;
     E.x += E.vx * dt;
 
-    // simple collision with ground
+    // ground snap
     if(E.y < L.groundY - E.h){ E.vy = (E.vy||0) + MOVE.GRAV*dt; E.y += E.vy*dt; }
     else { E.y = L.groundY - E.h; E.vy = 0; }
 
@@ -371,9 +422,6 @@ function update(dt){
   // portal win
   if(AABB({x:P.x,y:P.y,w:P.w,h:P.h}, L.portal)) winLevel();
 
-  // invincibility fade
-  P.iFrames = Math.max(0, P.iFrames - dt);
-
   // camera
   const cw = window._CW || innerWidth;
   cam.x += ((P.x - cw*0.38) - cam.x) * 0.12;
@@ -384,7 +432,12 @@ function update(dt){
   setHUD();
 }
 
-/* ---------- frame loop ---------- */
+/* ---------- frame loop / boot ---------- */
+function togglePause(){
+  if (!running){ document.getElementById('pauseDlg').classList.add('hidden'); running=true; }
+  else { document.getElementById('pauseDlg').classList.remove('hidden'); running=false; }
+}
+
 (function boot(){
   const c = document.getElementById('game'), g = c.getContext('2d');
   const chip = document.getElementById('chip');
@@ -425,8 +478,8 @@ function update(dt){
   requestAnimationFrame(frame);
 
   perfBtn.onclick = ()=>{ lowPerf=!lowPerf; perfBtn.textContent = 'Low-Perf: ' + (lowPerf?'ON':'OFF'); };
-  pauseBtn.onclick= ()=>{ document.getElementById('pauseDlg').classList.remove('hidden'); running=false; };
-  resume.onclick  = ()=>{ document.getElementById('pauseDlg').classList.add('hidden'); running=true; };
+  pauseBtn.onclick= togglePause;
+  resume.onclick  = togglePause;
 })();
 
 /* ---------- start flow (Play button, focus, audio unlock) ---------- */
