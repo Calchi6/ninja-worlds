@@ -161,26 +161,30 @@ function enableTouchControls(){
     el.addEventListener('pointerleave', lift);
   }
 
-  bindHold(document.getElementById('tLeft'),
-    ()=>{ keys['arrowleft']=keys['a']=true; },
-    ()=>{ keys['arrowleft']=keys['a']=false; });
+bindHold(document.getElementById('tLeft'),
+    () => { keys['arrowleft'] = keys['a'] = true; },
+    () => { keys['arrowleft'] = keys['a'] = false; }
+);
 
-  bindHold(document.getElementById('tRight'],
-    ()=>{ keys['arrowright']=keys['d']=true; },
-    ()=>{ keys['arrowright']=keys['d']=false; });
+bindHold(document.getElementById('tRight'),
+    () => { keys['arrowright'] = keys['d'] = true; },
+    () => { keys['arrowright'] = keys['d'] = false; }
+);
 
-  bindHold(document.getElementById('tJump'),
-    ()=>{ keys[' ']=keys['space']=true; },
-    ()=>{ keys[' ']=keys['space']=false; });
+bindHold(document.getElementById('tJump'),
+    () => { keys[' '] = keys['space'] = true; },
+    () => { keys[' '] = keys['space'] = false; }
+);
 
-  bindHold(document.getElementById('tDash'),
-    ()=>{ keys['shift']=true; },
-    ()=>{ keys['shift']=false; });
+bindHold(document.getElementById('tDash'),
+    () => { keys['shift'] = true; },
+    () => { keys['shift'] = false; }
+);
 
-  bindHold(document.getElementById('tAtk'),
-    ()=>{ keys['j']=true; },
-    ()=>{ keys['j']=false; });
-}
+bindHold(document.getElementById('tAtk'),
+    () => { keys['j'] = true; },
+    () => { keys['j'] = false; }
+);
 
 /* ---------- level ---------- */
 function buildLevel(){
