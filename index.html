@@ -398,6 +398,17 @@ function drawLevel(g,c,L,t){
   window.addEventListener('keydown', ()=>c.focus(), {once:true});
   window.addEventListener('pointerdown', ()=>c.focus(), {once:true});
 })();
+ // Ensure canvas is focusable and focused
+document.addEventListener('DOMContentLoaded', () => {
+  setTimeout(() => {
+    const c = document.querySelector('canvas');
+    if (c) {
+      c.setAttribute('tabindex', '0');
+      c.focus();
+      c.addEventListener('click', () => c.focus());
+    }
+  }, 200); // short delay so canvas exists
+});
 </script>
 </body>
 </html>
