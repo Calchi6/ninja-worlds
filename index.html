@@ -34,6 +34,42 @@
 </style>
 </head>
 <body>
+<!-- Add this inside your <body> before the game canvas -->
+<div id="build-status" 
+     style="position:fixed;top:10px;left:10px;padding:4px 8px;
+            background:green;color:white;font-size:14px;
+            border-radius:4px;z-index:9999;">
+  Build OK – <span id="build-time"></span>
+</div>
+
+<script>
+  <script>
+// Show current date/time of build
+fetch('https://api.github.com/repos/Calchi6/ninja-worlds/commits/main')
+  .then(response => response.json())
+  .then(data => {
+    if (!data.commit) throw new Error("No commit data found"); // Safety net
+    const commitDate = new Date(data.commit.committer.date);
+    document.getElementById('build-time').textContent = commitDate.toLocaleString();
+  })
+  .catch(() => {
+    document.getElementById('build-time').textContent = "Unknown";
+  });
+
+// Remove after 3 seconds
+setTimeout(() => {
+  const el = document.getElementById('build-status');
+  if (el) el.remove();
+}, 3000);
+</script>
+
+  });
+
+  setTimeout(() => {
+    const el = document.getElementById('build-status');
+    if (el) el.remove();
+  }, 3000);
+</script>
 
 <canvas id="game" aria-label="Ninja Worlds v0.8"></canvas>
 
@@ -516,22 +552,6 @@ document.addEventListener('DOMContentLoaded', function(){
     overlay.style.display='none';
     try{ canvas.focus(); }catch(_){}
   }
-
-  playBtn.addEventListener('click', startFromUI, true);
-  contBtn.addEventListener('click', startFromUI, true);
-  againW .addEventListener('click', ()=>{ location.reload(); });
-  againL .addEventListener('click', ()=>{ location.reload(); });
-
-  // first gesture (mobile/desktop)
-  addEventListener('pointerdown', startFromUI, { once:true });
-  addEventListener('keydown',     startFromUI, { once:true });
-
-  // keep focus on click
-  canvas.addEventListener('click', ()=>{ try{ canvas.focus(); }catch(_){} });
-});
-</script>
-</body>
-</html>
 
 document.addEventListener('DOMContentLoaded', function(){
   const canvas  = document.getElementById('game');
