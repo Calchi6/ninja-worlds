@@ -150,6 +150,9 @@ function enableTouchControls(){
   bindHold(document.getElementById('tDash'),  ()=>{ keys['shift']=true; },              ()=>{ keys['shift']=false; });
   bindHold(document.getElementById('tAtk'),   ()=>{ keys['j']=true; },                  ()=>{ keys['j']=false; });
 } /* <-- this closes enableTouchControls() */
+/* Camera constants */
+const CAM_LERP = 0.12;   // Camera follow speed
+const CAM_OFFSET = 0.38; // Player position on screen (0.5 = centered)
 
 function buildLevel(){
   const solids=[], enemies=[], coins=[];
@@ -261,7 +264,7 @@ function togglePause(){ if(!running){ document.getElementById('pauseDlg').classL
 P.x = 80;
 P.y = L.groundY - P.h - 2;
 // Center camera on player at start
-cam.x = Math.max(0, P.x - (innerWidth * 0.38));
+cam.x += ( (P.x - (innerWidth * CAM_OFFSET)) - cam.x ) * CAM_LERP;
 cam.y = 0;
  running=true;
   let last=performance.now(), fpsF=0,fps=0,t=0;
