@@ -410,6 +410,25 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }, 200); // short delay so canvas exists
 });
+ // Always focus the game canvas on load and when Play/Continue is clicked
+const gameCanvas = document.getElementById('game');
+if (gameCanvas) {
+  gameCanvas.setAttribute('tabindex', '0');
+  gameCanvas.focus();
+  gameCanvas.addEventListener('click', () => gameCanvas.focus());
+
+  // Also hook Play/Continue buttons
+  const startScreen = document.getElementById('start');
+  if (startScreen) {
+    startScreen.addEventListener('click', () => {
+      gameCanvas.focus();
+      // Some engines listen for Enter to start
+      setTimeout(() => {
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+      }, 20);
+    });
+  }
+}
 </script>
 </body>
 </html>
