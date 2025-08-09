@@ -395,40 +395,63 @@ function drawLevel(g,c,L,t){
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
+/* Minimal, safe start/focus/audio unlock */
+document.addEventListener('DOMContentLoaded', function () {
+  var c = document.getElementById('game');
 
-  window.addEventListener('keydown', ()=>c.focus(), {once:true});
-  window.addEventListener('pointerdown', ()=>c.focus(), {once:true});
-})();
- // Ensure canvas is focusable and focused
-document.addEventListener('DOMContentLoaded', () => {
-  setTimeout(() => {
-    const c = document.querySelector('canvas');
-    if (c) {
-      c.setAttribute('tabindex', '0');
-      c.focus();
-      c.addEventListener('click', () => c.focus());
-    }
-  }, 200); // short delay so canvas exists
-});
- // Always focus the game canvas on load and when Play/Continue is clicked
-const gameCanvas = document.getElementById('game');
-if (gameCanvas) {
-  gameCanvas.setAttribute('tabindex', '0');
-  gameCanvas.focus();
-  gameCanvas.addEventListener('click', () => gameCanvas.focus());
-
-  // Also hook Play/Continue buttons
-  const startScreen = document.getElementById('start');
-  if (startScreen) {
-    startScreen.addEventListener('click', () => {
-      gameCanvas.focus();
-      // Some engines listen for Enter to start
-      setTimeout(() => {
-        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
-      }, 20);
+  // Make canvas focusable + focus now and on click
+  if (c) {
+    c.setAttribute('tabindex', '0');
+    try { c.focus(); } catch (e) {}
+    c.addEventListener('click', function () {
+      try { c.focus(); } catch (e) {}
     });
   }
-}
+
+  // Unlock AudioContext on first gesture (Safari/Chrome policy)
+  var audioUnlocked = false;
+  function unlockAudioOnce() {
+    if (audioUnlocked) return;
+    var ACtx = window.AudioContext || window.webkitAudioContext;
+    if (ACtx) {
+      if (!window._gameAudioCtx) window._gameAudioCtx = new ACtx();
+      if (window._gameAudioCtx.state === 'suspended') {
+        try { window._gameAudioCtx.resume(); } catch (e) {}
+      }
+    }
+    audioUnlocked = true;
+  }
+
+  function startGame() {
+    unlockAudioOnce();
+    if (c) { try { c.focus(); } catch (e) {} }
+
+    // Hide start/pause overlays if present
+    var start = document.getElementById('start');
+    if (start && start.classList) { start.classList.add('hidden'); }
+    var pause = document.getElementById('pauseDlg') || document.getElementById('pause');
+    if (pause && pause.classList) { pause.classList.add('hidden'); }
+
+    // Nudge engines that listen for Enter to start
+    setTimeout(function () {
+      try { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' })); } catch (e) {}
+    }, 10);
+  }
+
+  // Wire Play/Continue buttons
+  var btns = document.getElementsByTagName('button');
+  for (var i = 0; i < btns.length; i++) {
+    var t = (btns[i].textContent || '').toLowerCase().trim();
+    if (t === 'play' || t === 'continue') {
+      btns[i].addEventListener('click', startGame, true);
+    }
+  }
+
+  // Also allow any first click/key to start (mobile/desktop)
+  window.addEventListener('pointerdown', startGame, { once: true });
+  window.addEventListener('keydown', startGame, { once: true });
+});
+
 </script>
 </body>
 </html>
