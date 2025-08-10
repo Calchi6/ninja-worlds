@@ -1,481 +1,128 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no"/>
-<title>Ninja Worlds — v0.8 (Crimson Dusk)</title>
-<meta name="theme-color" content="#0b0d12">
-<style>
-  :root{--ui:rgba(255,255,255,.92);--ink:#0b0d12}
-  html,body{margin:0;height:100%;background:#0b0d12;color:#fff;font:14px/1.1 system-ui,-apple-system,Segoe UI,Inter,sans-serif;overscroll-behavior:none}
-  canvas{position:fixed;inset:0;touch-action:none;display:block;outline:none}
-
-  /* HUD */
-  #hud{position:fixed;inset:0;pointer-events:none}
-  .row{position:absolute;top:12px;left:12px;right:12px;display:flex;gap:10px;align-items:center;justify-content:space-between}
-  .badge{background:rgba(0,0,0,.55);padding:8px 12px;border-radius:12px;font-weight:600}
-  .btn{pointer-events:auto;border:0;border-radius:10px;padding:10px 14px;font-weight:800;background:var(--ui);color:#000;min-width:86px}
-
-  /* Dialogs */
-  .dialog{position:fixed;inset:0;background:rgba(10,12,16,.42);backdrop-filter:blur(6px);display:grid;place-items:center}
-  .panel{background:rgba(20,22,28,.9);border:1px solid rgba(255,255,255,.15);padding:18px 20px;border-radius:12px;min-width:260px}
-  .panel h2{margin:.2em 0 8px;font:700 18px system-ui}
-  .panel p{opacity:.85;margin:.2em 0 10px}
-  .hidden{display:none}
-
-  /* Touch controls */
-  .touch{position:fixed;bottom:16px;left:16px;right:16px;display:none;justify-content:space-between;align-items:flex-end;gap:12px;pointer-events:none}
-  .pad{display:flex;gap:12px;pointer-events:auto}
-  .tbtn{width:68px;height:68px;border-radius:999px;border:0;background:rgba(255,255,255,.12);backdrop-filter:blur(6px);
-        color:#fff;font:700 14px system-ui;display:grid;place-items:center;box-shadow:inset 0 0 0 2px rgba(255,255,255,.15)}
-  .tbtn:active{transform:scale(.97)}
-  .lg{width:80px;height:80px}
-  @media (max-width: 820px){ .touch{display:flex} } /* auto-show on phones/tablets */
-</style>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no"/>
+  <title>Ninja Worlds — v0.8 (Fixed Gravity)</title>
+  <meta name="theme-color" content="#0b0d12">
+  <style>
+    body, html { margin: 0; height: 100%; background: #0b0d12; color: white; }
+    canvas { display: block; width: 100%; height: 100%; }
+  </style>
 </head>
 <body>
-
-<!-- tiny build banner -->
-<div id="build-status" style="position:fixed;top:10px;left:10px;padding:4px 8px;background:green;color:white;font-size:14px;border-radius:4px;z-index:9999;">
-  Build OK – <span id="build-time"></span>
-</div>
+<canvas id="game"></canvas>
 <script>
-fetch('https://api.github.com/repos/Calchi6/ninja-worlds/commits/main')
-  .then(r=>r.json()).then(d=>{
-    const s = d.commit && d.commit.committer && d.commit.committer.date
-      ? new Date(d.commit.committer.date).toLocaleString() : "Unknown";
-    document.getElementById('build-time').textContent = s;
-  }).catch(_=>{ document.getElementById('build-time').textContent="Unknown"; });
-setTimeout(()=>{ const el=document.getElementById('build-status'); if(el) el.remove(); }, 3000);
-</script>
+// Game variables
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
 
-<canvas id="game" aria-label="Ninja Worlds v0.8"></canvas>
+// Game parameters
+const GRAVITY = 0.8; // Gravity force
+const FRICTION = 0.9; // Player friction when standing still
+const MOVE_SPEED = 4;
+const JUMP_FORCE = -15;
 
-<!-- HUD -->
-<div id="hud">
-  <div class="row">
-    <div style="display:flex;gap:8px;align-items:center">
-      <div id="hp"    class="badge">HP: ❤❤❤</div>
-      <div id="coins" class="badge">Coins: 0</div>
-      <div id="chip"  class="badge" style="opacity:.75">booting…</div>
-    </div>
-    <div style="display:flex;gap:8px">
-      <button id="perf"  class="btn">Low-Perf: OFF</button>
-      <button id="pause" class="btn">Pause</button>
-    </div>
-  </div>
-</div>
+// Player object
+const player = {
+  x: 100,
+  y: 200,
+  width: 30,
+  height: 50,
+  vx: 0,
+  vy: 0,
+  onGround: false,
+  color: '#ffffff',
+};
 
-<!-- Touch Controls -->
-<div id="touch" class="touch">
-  <div class="pad">
-    <button id="tLeft"  class="tbtn lg">◀︎</button>
-    <button id="tRight" class="tbtn lg">▶︎</button>
-  </div>
-  <div class="pad">
-    <button id="tJump"  class="tbtn lg">⤴︎</button>
-    <button id="tDash"  class="tbtn">Dash</button>
-    <button id="tAtk"   class="tbtn">Atk</button>
-  </div>
-</div>
+// Platform array (for ground and obstacles)
+const platforms = [
+  { x: 0, y: canvas.height - 50, width: canvas.width, height: 50 }, // ground
+  { x: 300, y: 400, width: 200, height: 20 }, // floating platform
+];
 
-<!-- START -->
-<div id="start" class="dialog">
-  <div class="panel">
-    <h2>Ninja Worlds — v0.8</h2>
-    <p>Move: WASD / Arrows · Jump: Space · Dash: Shift · Attack: J · Pause: P</p>
-    <div style="display:flex;gap:8px">
-      <button id="new"  class="btn">Play</button>
-      <button id="cont" class="btn" disabled>Continue</button>
-    </div>
-  </div>
-</div>
-
-<!-- PAUSE / WIN / LOSE -->
-<div id="pauseDlg" class="dialog hidden">
-  <div class="panel"><h2>Paused</h2><p>Press any key / tap to resume.</p><button id="resume" class="btn">Resume</button></div>
-</div>
-<div id="winDlg" class="dialog hidden">
-  <div class="panel"><h2>You Win!</h2><button id="playAgainWin" class="btn">Play Again</button></div>
-</div>
-<div id="gameOverDlg" class="dialog hidden">
-  <div class="panel"><h2>Game Over</h2><button id="playAgainLose" class="btn">Try Again</button></div>
-</div>
-
-<script>
-/* ===================== utils ===================== */
-const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
-const AABB=(a,b)=>a.x<b.x+b.w && a.x+a.w>b.x && a.y<b.y+b.h && a.y+a.h>b.y;
-function beep(freq=880, dur=0.08){
-  try{
-    const AC = window.AudioContext||window.webkitAudioContext; if(!AC) return;
-    if(!window._ac) window._ac = new AC();
-    const ac=window._ac, o=ac.createOscillator(), g=ac.createGain();
-    o.type='square'; o.frequency.value=freq; g.gain.value=0.05; o.connect(g); g.connect(ac.destination);
-    o.start(); o.stop(ac.currentTime+dur);
-  }catch(_){}
+// Resize canvas to fit the screen
+function resizeCanvas() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
 }
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
 
-/* ===================== globals ===================== */
-let L=null;
-const P = {x:100,y:220,w:28,h:40,vx:0,vy:0,face:1,on:false,jumps:0,maxJ:1,dashCd:0,hp:3,iFrames:0,coins:0,_wasOn:false};
-const cam = {x:0,y:0,shake:0};
-const MOVE = {RUN:260, AIR_ACCEL:1100, RUN_DECEL:2400, JUMP_V:420, GRAV:980};
-let running=false, lowPerf=false;
-let COYOTE=0, JBUF=0;
-const COYOTE_TIME=0.08, JUMP_BUF=0.10;
-
-/* camera follow */
-const CAM_LERP=0.12;   // 0.05 smoother, 0.3 snappier
-const CAM_OFFSET=0.38; // where player sits on screen (0.5 = center)
-
-/* particles */
-const parts=[];
-function spawnDust(x,y,count=10){
-  for(let i=0;i<count;i++){
-    parts.push({x,y, vx:(Math.random()*120-60), vy:-(60+Math.random()*80),
-      r:2+Math.random()*2, life:0.4+Math.random()*0.3, t:0, col:'rgba(255,230,210,.9)'});
-  }
-}
-function spawnSlash(x,y,dir=1){
-  for(let i=0;i<12;i++){
-    parts.push({x:x+(Math.random()*18-9), y:y+(Math.random()*14-7),
-      vx:(80+Math.random()*120)*dir, vy:(Math.random()*60-30),
-      r:1.6, life:0.25, t:0, col:'rgba(255,255,255,.85)'});
+// Gravity and collision detection functions
+function applyGravity() {
+  if (!player.onGround) {
+    player.vy += GRAVITY;
+  } else {
+    player.vy = 0;
   }
 }
 
-/* ===================== input ===================== */
-const keys = Object.create(null);
-function createInput(canvas){
-  const touch = 'ontouchstart' in window || navigator.maxTouchPoints>0;
-  addEventListener('keydown', e=>{
-    const k=e.key.toLowerCase(); keys[k]=true;
-    if(e.key===' ') e.preventDefault(); if(k==='p') togglePause();
-  });
-  addEventListener('keyup', e=>{ keys[e.key.toLowerCase()]=false; });
-  canvas.addEventListener('pointerdown', ()=>canvas.focus());
-  return touch;
-}
-function enableTouchControls(){
-  const tc=document.getElementById('touch'); tc.style.display='flex';
-  function bindHold(el,down,up){
-    const press=e=>{e.preventDefault();down();};
-    const lift =e=>{e.preventDefault();up();};
-    el.addEventListener('pointerdown',press);
-    el.addEventListener('pointerup',lift);
-    el.addEventListener('pointercancel',lift);
-    el.addEventListener('pointerleave',lift);
-  }
-  bindHold(document.getElementById('tLeft'), ()=>{keys['arrowleft']=keys['a']=true;}, ()=>{keys['arrowleft']=keys['a']=false;});
-  bindHold(document.getElementById('tRight'),()=>{keys['arrowright']=keys['d']=true;}, ()=>{keys['arrowright']=keys['d']=false;});
-  bindHold(document.getElementById('tJump'), ()=>{keys[' ']=keys['space']=true;},   ()=>{keys[' ']=keys['space']=false;});
-  bindHold(document.getElementById('tDash'), ()=>{keys['shift']=true;},             ()=>{keys['shift']=false;});
-  bindHold(document.getElementById('tAtk'),  ()=>{keys['j']=true;},                 ()=>{keys['j']=false;});
-}
+function checkCollisions() {
+  player.onGround = false;
 
-/* ===================== level ===================== */
-function buildLevel(){
-  const solids=[], enemies=[], coins=[];
-  const DPR = window.devicePixelRatio||1;
-  const viewH = window._CH ? window._CH / DPR : innerHeight; // CSS px
-  const W = 2600, GH = viewH * 0.82;
-
-  const addS=(x,y,w,h)=>solids.push({x,y,w,h});
-  const addCoin=(x,y)=>coins.push({x,y,w:18,h:18,t:0});
-
-  // floor + platforms
-  addS(0, GH, W, 22);
-  addS(160, GH-120, 220, 18);
-  addS(520, GH-200, 260, 18);
-  addS(940, GH-140, 200, 18);
-  addS(1320, GH-220, 260, 18);
-  addS(1780, GH-140, 200, 18);
-  addS(2100, GH-200, 220, 18);
-
-  // coins
-  for(let i=0;i<10;i++) addCoin(240+i*180, GH-160 + (i&1?-30:0));
-
-  // light AI enemies
-  for(let i=0;i<4;i++)
-    enemies.push({x:620+i*360,y:GH-64,w:44,h:44,vx:0,vy:0,t:0,type:(i%2?'ronin':'monk'),hp:2});
-
-  const portal={x:W-140,y:GH-160,w:46,h:128};
-  return {solids,enemies,coins,portal,width:W,groundY:GH};
-}
-
-/* ===================== render ===================== */
-function drawLevel(g,c,l,now){
-  const cw=window._CW||innerWidth, ch=window._CH||innerHeight;
-
-  // apply camera shake (small random offset scaled by cam.shake)
-  const sx=(Math.random()*2-1)*cam.shake, sy=(Math.random()*2-1)*cam.shake;
-
-  // Crimson Dusk animated sky
-  const wobble = Math.sin(now*0.35)*16;
-  const grad = g.createLinearGradient(0, ch + wobble, 0, wobble);
-  grad.addColorStop(0.08,"#8A2322");
-  grad.addColorStop(0.33,"#9B302B");
-  grad.addColorStop(0.66,"#A33C44");
-  grad.addColorStop(1.00,"#FFB37E");
-  g.fillStyle=grad; g.fillRect(0,0,cw,ch);
-
-  // soft sun glow
-  g.save();
-  const sunX=(cw*0.62)-(cam.x*0.05), sunY=ch*0.82;
-  const sunG=g.createRadialGradient(sunX,sunY,0,sunX,sunY,120);
-  sunG.addColorStop(0,"rgba(255,179,126,.8)");
-  sunG.addColorStop(1,"rgba(255,179,126,0)");
-  g.fillStyle=sunG; g.beginPath(); g.arc(sunX,sunY,120,0,Math.PI*2); g.fill();
-  g.restore();
-
-  // ground/platforms
-  g.fillStyle="#2b1b1b";
-  for(const s of l.solids) g.fillRect(s.x-(cam.x+sx), s.y-(cam.y+sy), s.w, s.h);
-
-  // coins
-  g.fillStyle="#FFD93D";
-  for(const coin of l.coins){
-    g.beginPath();
-    g.arc(coin.x-(cam.x+sx)+coin.w/2, coin.y-(cam.y+sy)+coin.h/2, coin.w/2, 0, Math.PI*2);
-    g.fill();
-  }
-
-  // portal
-  const p=l.portal;
-  const pg=g.createLinearGradient(p.x-(cam.x+sx),p.y,p.x-(cam.x+sx),p.y+p.h);
-  pg.addColorStop(0,"#6a5acd"); pg.addColorStop(1,"#9370db");
-  g.fillStyle=pg; g.fillRect(p.x-(cam.x+sx), p.y-(cam.y+sy), p.w, p.h);
-
-  // particles
-  for(const pt of parts){
-    g.fillStyle=pt.col;
-    g.beginPath(); g.arc(pt.x-(cam.x+sx), pt.y-(cam.y+sy), pt.r, 0, Math.PI*2); g.fill();
-  }
-
-  // player (with i-frame aura)
-  if(P.iFrames>0){ g.save(); g.globalAlpha=.35; g.fillStyle='#a0e8ff';
-    g.fillRect(P.x-(cam.x+sx)-6,P.y-(cam.y+sy)-6,P.w+12,P.h+12); g.restore(); }
-  g.fillStyle="#ffffff";
-  g.fillRect(P.x-(cam.x+sx), P.y-(cam.y+sy), P.w, P.h);
-
-  // enemies
-  for(const E of l.enemies){
-    g.fillStyle = E.type==='ronin' ? '#ff6e6e' : '#7aa6ff';
-    g.fillRect(E.x-(cam.x+sx), E.y-(cam.y+sy), E.w, E.h);
-  }
-}
-
-/* ===================== HUD ===================== */
-function setHUD(){
-  const hpEl=document.getElementById('hp'), coinEl=document.getElementById('coins');
-  hpEl.textContent='HP: '+'❤'.repeat(P.hp)+'♡'.repeat(Math.max(0,3-P.hp));
-  coinEl.textContent='Coins: '+(P.coins|0);
-}
-
-/* ===================== game flow ===================== */
-function hitPlayer(dmg){
-  if(P.iFrames>0||dmg<=0) return;
-  P.hp=Math.max(0,P.hp-dmg);
-  P.iFrames=1.0;
-  P.vy=-220; cam.shake = Math.max(cam.shake, 6);
-  beep(220,.06);
-  if(P.hp===0) return gameOver();
-}
-function gameOver(){ running=false; document.getElementById('gameOverDlg').classList.remove('hidden'); }
-function winLevel(){ running=false; document.getElementById('winDlg').classList.remove('hidden'); }
-
-/* collisions (mutates P directly) */
-function resolveCollisions(box, solids){
-  for(const s of solids){
-    if(!AABB(box,s)) continue;
-    const dx1=(s.x+s.w)-box.x, dx2=(box.x+box.w)-s.x, dy1=(s.y+s.h)-box.y, dy2=(box.y+box.h)-s.y;
-    const minX=Math.min(dx1,dx2), minY=Math.min(dy1,dy2);
-    if(minX<minY){
-      box.x += (dx1<dx2?dx1:-dx2);
-    }else{
-      box.y += (dy1<dy2?dy1:-dy2);
-      if(dy1<dy2){ // landed on top
-        box.on=true; box.vy=0; box.jumps=0;
-        if(!box._wasOn){ cam.shake = Math.max(cam.shake, 3); spawnDust(box.x+box.w/2, box.y+box.h, 10); beep(180,.03); }
-      }else{
-        if(box.vy<0) box.vy=0;
-      }
+  // Check for collisions with platforms
+  for (const platform of platforms) {
+    if (player.x + player.width > platform.x && player.x < platform.x + platform.width &&
+      player.y + player.height <= platform.y && player.y + player.height + player.vy >= platform.y) {
+      player.y = platform.y - player.height;
+      player.onGround = true;
     }
   }
 }
 
-/* sword hitbox */
-function attackHitbox(){ const w=34,h=28,ox=P.face>0?P.w:-w; return {x:P.x+ox,y:P.y+(P.h-h)/2,w,h}; }
+function movePlayer() {
+  if (keys['ArrowLeft'] || keys['a']) player.vx = -MOVE_SPEED;
+  else if (keys['ArrowRight'] || keys['d']) player.vx = MOVE_SPEED;
+  else player.vx *= FRICTION;
 
-/* ===================== update ===================== */
-let slashTimer=0;
-function update(dt){
-  // previous grounded
-  P._wasOn = P.on;
+  player.x += player.vx;
+  player.y += player.vy;
 
-  // timers
-  COYOTE = Math.max(0, P.on ? COYOTE_TIME : COYOTE - dt);
-  JBUF   = Math.max(0, JBUF - dt);
-  P.iFrames = Math.max(0, P.iFrames - dt);
-  slashTimer = Math.max(0, slashTimer - dt);
-  cam.shake = Math.max(0, cam.shake - dt*8); // decay shake
-
-  // input
-  const left=keys['a']||keys['arrowleft'], right=keys['d']||keys['arrowright'],
-        jump=keys[' ']||keys['space'], dash=keys['shift'], atk=keys['j'];
-  if(jump && JBUF<=0) JBUF = JUMP_BUF;
-
-  // horizontal
-  const ax=(right?1:0)-(left?1:0);
-  P.vx += ax * (P.on? MOVE.RUN*10 : MOVE.AIR_ACCEL) * dt;
-  P.vx = clamp(P.vx, -MOVE.RUN, MOVE.RUN);
-  if(ax===0 && P.on){
-    const stop=Math.sign(P.vx)*Math.min(Math.abs(P.vx),MOVE.RUN_DECEL*dt); P.vx -= stop;
-  }
-  if(right) P.face=1; if(left) P.face=-1;
-
-  // jump
-  if(JBUF>0 && (COYOTE>0 || P.jumps<P.maxJ)){
-    P.vy=-MOVE.JUMP_V; P.on=false; P.jumps++; JBUF=0;
-    keys[' ']=keys['space']=false; beep(660,.06);
-  }
-  if((!keys[' ']&&!keys['space']) && P.vy<-120) P.vy=-120;
-
-  // dash
-  if(dash && P.dashCd<=0){ P.vx += 360*P.face; P.dashCd=.35; cam.shake=Math.max(cam.shake,2); beep(440,.05); }
-  P.dashCd=Math.max(0,P.dashCd-dt);
-
-  // attack
-  if(atk){
-    const hit=attackHitbox();
-    spawnSlash(hit.x+hit.w/2, hit.y+hit.h/2, P.face);
-    for(let i=L.enemies.length-1;i>=0;i--){
-      const E=L.enemies[i];
-      if(AABB(hit,{x:E.x,y:E.y,w:E.w,h:E.h})){ L.enemies.splice(i,1); beep(520,.07); cam.shake=Math.max(cam.shake,5); }
-    }
-    slashTimer=.12; keys['j']=false;
-  }
-
-  // physics
-  P.vy += MOVE.GRAV*dt;
-  P.x += P.vx*dt; P.y += P.vy*dt; P.on=false;
-  resolveCollisions(P, L.solids);
-  P.x = clamp(P.x, 0, L.width-P.w);
-  if(P.y > L.groundY + 400) hitPlayer(3);
-
-  // enemies
-  for(const E of L.enemies){
-    E.t+=dt;
-    const patrol=Math.sin(E.t*.8)*40;
-    const dx=P.x-E.x, chase=Math.abs(dx)<260?Math.sign(dx)*60:0;
-    E.vx=(patrol+chase)*dt*6; E.x += E.vx*dt;
-    if(E.y < L.groundY - E.h){ E.vy=(E.vy||0)+MOVE.GRAV*dt; E.y+=E.vy*dt; } else { E.y=L.groundY-E.h; E.vy=0; }
-    if(AABB({x:P.x,y:P.y,w:P.w,h:P.h},{x:E.x,y:E.y,w:E.w,h:E.h})) hitPlayer(1);
-  }
-
-  // coins
-  for(let i=L.coins.length-1;i>=0;i--){
-    const C=L.coins[i];
-    if(AABB({x:P.x,y:P.y,w:P.w,h:P.h},{x:C.x-8,y:C.y-8,w:16,h:16})){
-      L.coins.splice(i,1); P.coins++; beep(880,.04);
-    }
-  }
-
-  // portal win
-  if(AABB({x:P.x,y:P.y,w:P.w,h:P.h}, L.portal)) winLevel();
-
-  // particles sim
-  for(let i=parts.length-1;i>=0;i--){
-    const p=parts[i]; p.t+=dt; if(p.t>=p.life){ parts.splice(i,1); continue; }
-    p.vy += 900*dt*0.6; // little gravity
-    p.x += p.vx*dt; p.y += p.vy*dt;
-    p.r *= 0.98;
-  }
-
-  // camera
-  const cw=window._CW||innerWidth;
-  const targetX = clamp(P.x - cw*CAM_OFFSET, 0, L.width - cw);
-  cam.x += (targetX - cam.x) * CAM_LERP; cam.y=0;
-
-  setHUD();
+  // Boundary checks
+  if (player.x < 0) player.x = 0;
+  if (player.x + player.width > canvas.width) player.x = canvas.width - player.width;
 }
 
-/* ===================== loop / boot ===================== */
-function togglePause(){
-  if(!running){ document.getElementById('pauseDlg').classList.add('hidden'); running=true; }
-  else{ document.getElementById('pauseDlg').classList.remove('hidden'); running=false; }
+function jump() {
+  if (player.onGround) {
+    player.vy = JUMP_FORCE;
+  }
 }
 
-(function boot(){
-  const c=document.getElementById('game'), g=c.getContext('2d');
-  const chip=document.getElementById('chip');
-  const perfBtn=document.getElementById('perf'), pauseBtn=document.getElementById('pause'), resume=document.getElementById('resume');
-
-  function resize(){
-    window._CW=c.width=innerWidth*(devicePixelRatio||1);
-    window._CH=c.height=innerHeight*(devicePixelRatio||1);
-    c.style.width=innerWidth+'px'; c.style.height=innerHeight+'px';
-  }
-  resize(); addEventListener('resize',resize);
-
-  if (createInput(c)) enableTouchControls();
-
-  L=buildLevel();
-
-  // spawn on ground & initial camera
-  P.x=80; P.y=L.groundY - P.h - 2;
-  cam.x = Math.max(0, P.x - (innerWidth * CAM_OFFSET)); cam.y=0;
-
-  running=true;
-
-  let last=performance.now(), fpsF=0,fps=0,t=0;
-  function frame(now){
-    const dt=Math.min(50,now-last)/1000; last=now;
-    if(running) update(dt);
-    if(!lowPerf || (lowPerf && (fpsF%2===0))) drawLevel(g,c,L,now/1000);
-    fpsF++; t+=dt; if(t>=1){fps=fpsF;fpsF=0;t=0;}
-    chip.textContent=`FPS: ${fps} | enemies: ${L.enemies.length}`;
-    requestAnimationFrame(frame);
-  }
-  requestAnimationFrame(frame);
-
-  perfBtn.onclick=()=>{ lowPerf=!lowPerf; perfBtn.textContent='Low-Perf: '+(lowPerf?'ON':'OFF'); };
-  pauseBtn.onclick=togglePause; resume.onclick=togglePause;
-})();
-
-/* ===================== start flow ===================== */
-document.addEventListener('DOMContentLoaded', function(){
-  const canvas=document.getElementById('game'), overlay=document.getElementById('start');
-  const playBtn=document.getElementById('new'), contBtn=document.getElementById('cont');
-  const againW=document.getElementById('playAgainWin'), againL=document.getElementById('playAgainLose');
-
-  canvas.setAttribute('tabindex','0');
-
-  let audioUnlocked=false;
-  function unlockAudioOnce(){
-    if(audioUnlocked) return;
-    const AC=window.AudioContext||window.webkitAudioContext;
-    if(AC){
-      if(!window._ac) window._ac=new AC();
-      if(window._ac.state==='suspended'){ try{ window._ac.resume(); }catch(_){ } }
-    }
-    audioUnlocked=true;
-  }
-  function startFromUI(){
-    unlockAudioOnce();
-    overlay.classList.add('hidden'); overlay.style.display='none';
-    try{ canvas.focus(); }catch(_){}
-  }
-
-  playBtn.addEventListener('click', startFromUI, true);
-  contBtn.addEventListener('click', startFromUI, true);
-  againW.addEventListener('click', ()=>location.reload());
-  againL.addEventListener('click', ()=>location.reload());
-  addEventListener('pointerdown', startFromUI, {once:true});
-  addEventListener('keydown',     startFromUI, {once:true});
-  canvas.addEventListener('click', ()=>{ try{ canvas.focus(); }catch(_){ } });
+// Handle user input for player movement
+const keys = {};
+window.addEventListener('keydown', (e) => {
+  keys[e.key.toLowerCase()] = true;
+  if (e.key.toLowerCase() === ' ') jump();
 });
+window.addEventListener('keyup', (e) => {
+  keys[e.key.toLowerCase()] = false;
+});
+
+// Game loop
+function gameLoop() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height); // Clear canvas
+
+  // Apply physics
+  applyGravity();
+  checkCollisions();
+  movePlayer();
+
+  // Draw player
+  ctx.fillStyle = player.color;
+  ctx.fillRect(player.x, player.y, player.width, player.height);
+
+  // Draw platforms
+  ctx.fillStyle = 'green';
+  for (const platform of platforms) {
+    ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+  }
+
+  requestAnimationFrame(gameLoop); // Loop the game
+}
+
+gameLoop(); // Start the game loop
 </script>
 </body>
 </html>
