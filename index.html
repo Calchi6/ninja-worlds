@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>Ninja Worlds — Crimson Dusk (Boss + Pause + Music)</title>
+<title>Ninja Worlds — Crimson Dusk (Clan + Wall-Run + Combo)</title>
 <style>
   html,body{margin:0;height:100%;background:#1a0f0f;color:#fff;font:14px/1.2 system-ui,-apple-system,Segoe UI,Inter}
   canvas{display:block;margin:0 auto;background:#1a0f0f}
@@ -12,7 +12,7 @@
   .panel h2{margin:.25em 0 10px;font:800 18px/1.2 system-ui}
   .row{display:flex;gap:10px;flex-wrap:wrap}
   .btn{border:0;border-radius:10px;padding:10px 14px;font-weight:800;background:#fff;color:#000;cursor:pointer}
-  #hud{position:fixed;left:12px;top:10px;display:flex;gap:10px;z-index:5}
+  #hud{position:fixed;left:12px;top:10px;display:flex;gap:10px;z-index:5;flex-wrap:wrap}
   .badge{background:rgba(0,0,0,.55);padding:6px 10px;border-radius:10px;font-weight:800}
   .linkbtn{background:rgba(255,255,255,.85);color:#000;border:0;border-radius:10px;padding:6px 10px;font-weight:800;cursor:pointer}
   #tips{position:fixed;right:12px;top:10px;opacity:.9;background:rgba(0,0,0,.45);padding:6px 10px;border-radius:10px;z-index:5}
@@ -22,6 +22,12 @@
   #bossbar{position:fixed;left:50%;transform:translateX(-50%);top:10px;z-index:6;display:none;gap:8px;align-items:center}
   #bossbar .bar{width:260px;height:12px;background:rgba(0,0,0,.4);border-radius:999px;overflow:hidden}
   #bossbar .fill{height:100%;background:#ff6e6e;width:100%}
+  /* Stamina bar */
+  #stam{position:fixed;left:12px;top:48px;z-index:6;display:flex;gap:8px;align-items:center}
+  #stam .bar{width:160px;height:10px;background:rgba(0,0,0,.35);border-radius:999px;overflow:hidden}
+  #stam .fill{height:100%;background:#7ce8ff;width:100%}
+  /* Combo */
+  #combo{position:fixed;right:12px;top:48px;z-index:6;background:rgba(0,0,0,.45);padding:6px 10px;border-radius:10px;font-weight:800;opacity:.95}
 </style>
 </head>
 <body>
@@ -33,13 +39,13 @@
   <div id="coins" class="badge">Coins: 0</div>
   <div id="power" class="badge">Power: —</div>
   <div id="key" class="badge">Key: ✖</div>
+  <div id="clan" class="badge">Clan: Crimson</div>
   <button id="audioBtn" class="linkbtn">🔊</button>
 </div>
-<div id="bossbar">
-  <span class="badge">Boss</span>
-  <div class="bar"><div class="fill" id="bossfill"></div></div>
-</div>
-<div id="tips" class="hide">Move: WASD/Arrows · Jump: Space · Attack: J · Dash: Shift · Pause: P/Esc · Editor: E</div>
+<div id="stam"><span class="badge">Stamina</span><div class="bar"><div class="fill" id="stamfill"></div></div></div>
+<div id="combo" class="hide">Combo ×1</div>
+<div id="bossbar"><span class="badge">Boss</span><div class="bar"><div class="fill" id="bossfill"></div></div></div>
+<div id="tips" class="hide">Move: WASD/Arrows · Jump: Space · Attack: J · Dash: Shift · Pause: P/Esc · Clan: C · Editor: E</div>
 <div id="editHelp">Editor: [0..6,9,10,11] pick tile · L-click place · R-click erase · G grid · S save (console)</div>
 
 <!-- TITLE / LEVEL SELECT -->
@@ -117,17 +123,14 @@ function beep(f=660,d=.06){
     o.start(); o.stop(ac.currentTime+d);
   }catch(_){}
 }
-// very light background loop (two detuned saws through a filter); toggleable
 function startMusic(){
   if(muted || musicNodes || !ensureAC()) return;
   const v=ac.createGain(); v.gain.value=.06;
   const f=ac.createBiquadFilter(); f.type='lowpass'; f.frequency.value=800;
   const o1=ac.createOscillator(), o2=ac.createOscillator();
-  o1.type='sawtooth'; o2.type='sawtooth';
-  o1.frequency.value=110; o2.frequency.value=111.5;
+  o1.type='sawtooth'; o2.type='sawtooth'; o1.frequency.value=110; o2.frequency.value=111.5;
   o1.connect(f); o2.connect(f); f.connect(v); v.connect(ac.destination);
-  o1.start(); o2.start();
-  musicNodes={o1,o2,f,v};
+  o1.start(); o2.start(); musicNodes={o1,o2,f,v};
 }
 function stopMusic(){
   if(!musicNodes) return;
@@ -137,13 +140,16 @@ function stopMusic(){
 
 /* ===== Persistence ===== */
 const SAVE_KEY = 'nw.crimson.save';
+const SAVE_CLAN= 'nw.crimson.clan';
 function loadSave(){
   try{ const s=localStorage.getItem(SAVE_KEY); return s?JSON.parse(s):null; }catch(_){ return null; }
 }
 function saveCheckpoint(state){
   try{ localStorage.setItem(SAVE_KEY, JSON.stringify(state)); }catch(_){}
 }
-function clearSave(){ try{ localStorage.removeItem(SAVE_KEY); }catch(_){}
+function clearSave(){ try{ localStorage.removeItem(SAVE_KEY); }catch(_){} }
+function loadClan(){ try{ return JSON.parse(localStorage.getItem(SAVE_CLAN)||'"Crimson"'); }catch(_){ return 'Crimson'; } }
+function saveClan(name){ try{ localStorage.setItem(SAVE_CLAN, JSON.stringify(name)); }catch(_){} }
 
 /* ===== Level formats =====
    Tiles:
@@ -151,7 +157,6 @@ function clearSave(){ try{ localStorage.removeItem(SAVE_KEY); }catch(_){}
    6 scroll (double jump), 7 spring, 9 checkpoint,
    10 gate (solid until key), 11 key
 */
-}
 const TILE=32;
 function makeEmpty(w,h,groundBand=true){
   const L=[]; for(let y=0;y<h;y++){ const r=new Array(w).fill(0); if(groundBand && y>=h-3) r.fill(1); L.push(r); } return L;
@@ -185,7 +190,7 @@ function buildLevel2(){
   const W=200,H=22, L=makeEmpty(W,H,true);
   for(let x=24;x<=28;x++) L[H-3][x]=0;
   for(let x=72;x<=76;x++) L[H-3][x]=0;
-  for(let x=120;x<=124;x++) L[H-3][x]=0;
+  for(let x=120;x<=124)x++) L[H-3][x]=0;
   stamp(L,14,14,10,2); setT(L,16,13,3); setT(L,20,13,3);
   stamp(L,36,12,8,2);  setT(L,39,11,3);
   stamp(L,60,10,10,2); setT(L,62, 9,6);
@@ -200,10 +205,32 @@ function buildLevel2(){
 let Level=null, LEVEL_W=0, LEVEL_H=0, totalCoins=0;
 let enemies=[], platforms=[], projectiles=[], boss=null;
 let cam={x:0,y:0}, editMode=false, showGrid=true, currentTile=1;
-const HUD = {hp:qs('#hp'), coins:qs('#coins'), power:qs('#power'), key:qs('#key')};
+const HUD = {hp:qs('#hp'), coins:qs('#coins'), power:qs('#power'), key:qs('#key'), clan:qs('#clan')};
 const UI  = {title:qs('#title'), win:qs('#win'), hud:qs('#hud'), tips:qs('#tips'), pause:qs('#pause')};
 const BossUI = {wrap:qs('#bossbar'), fill:qs('#bossfill')};
+const StamUI = {fill:qs('#stamfill')};
+const ComboUI= qs('#combo');
 function qs(s){ return document.querySelector(s); }
+
+/* ===== Clan system ===== */
+const CLANS = [
+  {name:'Crimson',  color:'#d43c3c'},
+  {name:'Jade',     color:'#35b36a'},
+  {name:'Azure',    color:'#3a86ff'},
+  {name:'Amethyst', color:'#8b5cf6'},
+];
+let clan = CLANS.find(c=>c.name===loadClan()) || CLANS[0];
+function cycleClan(){
+  const i = CLANS.findIndex(c=>c.name===clan.name);
+  clan = CLANS[(i+1)%CLANS.length];
+  HUD.clan.textContent = 'Clan: ' + clan.name;
+  saveClan(clan.name);
+}
+HUD.clan.textContent = 'Clan: ' + clan.name;
+
+/* Activated checkpoints for coloring this session */
+const activeCheckpoints = new Set();
+function keyFor(tx,ty){ return `${tx},${ty}`; }
 
 /* ===== Player & physics ===== */
 const GRAV=2200, RUN=380, AIR_ACCEL=2400, DECEL=5200, JUMP_V=650, MAX_FALL=1400, DASH=520;
@@ -211,8 +238,25 @@ const player = {
   x:0,y:0,w:22,h:28,vx:0,vy:0,face:1,
   on:false, wasOn:false, jumps:0, maxJ:1, dashCd:0, attackT:0,
   hp:3, iFrames:0, coins:0, power:false, key:false,
-  spawnX:0, spawnY:0, levelName:''
+  spawnX:0, spawnY:0, levelName:'',
+  stamina:100, maxStam:100, wallCling:false
 };
+
+/* Combo */
+let combo=0, comboTimer=0, score=0;
+function addCombo(kills=1){
+  combo += kills; comboTimer = 2.5;
+  ComboUI.classList.remove('hide');
+  ComboUI.textContent = `Combo ×${1+Math.floor(combo/3)} (${combo})`;
+}
+function tickCombo(dt){
+  if(combo>0){
+    comboTimer -= dt;
+    if(comboTimer<=0){ combo=0; ComboUI.classList.add('hide'); }
+  }
+}
+
+/* Input */
 const keys=Object.create(null);
 addEventListener('keydown',e=>{
   const k=e.key.toLowerCase();
@@ -223,6 +267,8 @@ addEventListener('keydown',e=>{
   if(k==='p' || e.key==='Escape'){
     if(running){ showPause(true); } else if(UI.pause.classList.contains('hide')) {} else { showPause(false); }
   }
+  // clan cycle
+  if(k==='c'){ cycleClan(); }
 
   if(editMode){
     if('012345679'.includes(e.key)) currentTile=parseInt(e.key,10);
@@ -233,7 +279,7 @@ addEventListener('keydown',e=>{
 addEventListener('keyup',e=>{ keys[e.key.toLowerCase()]=false; });
 addEventListener('blur', ()=>{ for(const k in keys) keys[k]=false; player.vx=0; });
 
-/* ===== Editor mouse ===== */
+/* Editor mouse */
 C.addEventListener('contextmenu', e=>{ if(editMode) e.preventDefault(); });
 C.addEventListener('mousedown', e=>{
   if(!editMode) return;
@@ -248,7 +294,7 @@ C.addEventListener('mousedown', e=>{
   }
 });
 
-/* ===== Tile helpers ===== */
+/* Tiles */
 const solid  = id => id===1||id===2||id===10;
 const deadly = id => id===4;
 function tileAt(px,py){
@@ -257,7 +303,7 @@ function tileAt(px,py){
   return Level.map[ty][tx];
 }
 
-/* ===== Collisions ===== */
+/* Collisions */
 function resolveX(ent, dx){
   ent.x += dx;
   const L = Math.floor(ent.x/TILE);
@@ -290,16 +336,18 @@ function resolveY(ent, dy){
         else     { ent.y = (ty+1)*TILE; if(ent.vy<0) ent.vy=0; }
       }
       if(ent===player){
-        if(id===3){ Level.map[ty][tx]=0; player.coins++; beep(880,.06); updateHUD(); }
+        if(id===3){ Level.map[ty][tx]=0; player.coins++; beep(880,.06); updateHUD(); score += 10*(1+Math.floor(combo/3)); addCombo(1); }
         if(id===6){ Level.map[ty][tx]=0; player.maxJ=2; player.power=true; beep(660,.1); updateHUD(); }
         if(id===7 && dy>0){ player.vy=-JUMP_V*1.2; beep(760,.08); }
-        if(id===9){ player.spawnX = tx*TILE+4; player.spawnY = ty*TILE - player.h - 2;
-          saveCheckpoint({level:player.levelName,x:player.spawnX,y:player.spawnY,coins:player.coins,power:player.power,key:player.key}); }
+        if(id===9){ // checkpoint
+          const k=keyFor(tx,ty); activeCheckpoints.add(k);
+          player.spawnX = tx*TILE+4; player.spawnY = ty*TILE - player.h - 2;
+          saveCheckpoint({level:player.levelName,x:player.spawnX,y:player.spawnY,coins:player.coins,power:player.power,key:player.key,clan:clan.name});
+          beep(520,.08);
+        }
         if(id===11){ Level.map[ty][tx]=0; player.key=true; beep(520,.12); updateHUD(); }
         if(id===10 && player.key){ Level.map[ty][tx]=0; beep(480,.08); } // open gate
-        if(id===5 && !boss){ // reaching flag ends level only if boss is defeated/none
-          win();
-        }
+        if(id===5 && !boss){ win(); }
         if(deadly(id)) damage(1);
       }
     }
@@ -307,7 +355,8 @@ function resolveY(ent, dy){
   ent.on = on;
 }
 
-/* ===== Platforms ===== */
+/* Platforms */
+let platforms=[];
 function buildPlatformsForLevel(){
   platforms.length=0;
   if(Level.name==='Level 1'){
@@ -348,7 +397,7 @@ function movePlatforms(dt){
   });
 }
 
-/* ===== Enemies ===== */
+/* Enemies */
 function buildEnemiesForLevel(){
   enemies.length=0;
   const end = Level.w - 10, step = (Level.name==='Level 1'? 16:14);
@@ -357,47 +406,12 @@ function buildEnemiesForLevel(){
   }
 }
 
-/* ===== Boss ===== */
+/* Boss */
+let boss=null, projectiles=[];
 function spawnBoss(){
   const x = (Level.w-12)*TILE, y = (LEVEL_H-6)*TILE-40;
-  boss = {
-    x, y, w:40, h:40, vx:-80, vy:0,
-    hp: (Level.name==='Level 2'? 18: 12),
-    iFrames:0, phase:0, shootT:0, jumpT:1.2, alive:true
-  };
-  BossUI.wrap.style.display='flex';
-  updateBossBar();
-}
-function updateBoss(dt){
-  if(!boss || !boss.alive) return;
-  boss.iFrames = Math.max(0,boss.iFrames-dt);
-  // simple AI: patrol, hop, shoot shuriken
-  boss.jumpT -= dt; if(boss.jumpT<=0 && boss.on){ boss.vy=-520; boss.jumpT=1.6; }
-  boss.shootT -= dt; if(boss.shootT<=0){
-    boss.shootT = (boss.hp>bossMax()*0.5? 1.1 : 0.7);
-    fireShuriken();
-  }
-  // chase a bit
-  if(Math.abs(player.x - boss.x) < 320) boss.vx = (player.x<boss.x ? -120:120);
-  // gravity
-  boss.vy += GRAV*dt; if(boss.vy>MAX_FALL) boss.vy=MAX_FALL;
-  // collide with tiles
-  resolveX(boss, boss.vx*dt);
-  resolveY(boss, boss.vy*dt);
-
-  // damage to player on touch
-  if(AABB(player,boss)) damage(1);
-
-  // sword hits
-  if(player.attackT>0){
-    const sword = {x: player.x + (player.face>0?player.w:-18), y: player.y+6, w:18, h:16};
-    if(AABB(sword,boss)) hurtBoss(1);
-  }
-  // stomp
-  const prevBottom = player.y + player.h - player.vy*dt;
-  if(AABB(player,boss) && player.vy>0 && prevBottom <= boss.y+8){
-    hurtBoss(1); player.vy=-JUMP_V*0.7;
-  }
+  boss = { x, y, w:40, h:40, vx:-80, vy:0, hp: (Level.name==='Level 2'? 18: 12), iFrames:0, shootT:0, jumpT:1.2, alive:true, on:false };
+  BossUI.wrap.style.display='flex'; updateBossBar();
 }
 function bossMax(){ return (Level.name==='Level 2'? 18: 12); }
 function updateBossBar(){
@@ -412,33 +426,46 @@ function fireShuriken(){
 function updateProjectiles(dt){
   for(let i=projectiles.length-1;i>=0;i--){
     const p = projectiles[i];
-    p.vy += 600*dt;
-    p.x += p.vx*dt; p.y += p.vy*dt;
-    // remove offscreen
+    p.vy += 600*dt; p.x += p.vx*dt; p.y += p.vy*dt;
     if(p.x < cam.x-100 || p.x > cam.x + C.clientWidth + 100 || p.y > LEVEL_H*TILE + 200){ projectiles.splice(i,1); continue; }
-    // hit player
     if(AABB(player,p)){ damage(1); projectiles.splice(i,1); }
-    // hit tiles
-    const id = tileAt(p.x,p.y);
-    if(solid(id)) projectiles.splice(i,1);
+    const id = tileAt(p.x,p.y); if(solid(id)) projectiles.splice(i,1);
   }
 }
 function hurtBoss(n){
   if(!boss || boss.iFrames>0) return;
   boss.hp = Math.max(0, boss.hp - n); boss.iFrames=0.4; beep(480,.08);
-  updateBossBar();
-  if(boss.hp===0){
-    boss.alive=false; boss=null; BossUI.wrap.style.display='none';
-    // open the final flag instantly now (player can finish)
+  updateBossBar(); addCombo(1); score += 25*(1+Math.floor(combo/3));
+  if(boss.hp===0){ boss.alive=false; boss=null; BossUI.wrap.style.display='none'; }
+}
+function updateBoss(dt){
+  if(!boss || !boss.alive) return;
+  boss.iFrames = Math.max(0,boss.iFrames-dt);
+  boss.jumpT -= dt; if(boss.jumpT<=0 && boss.on){ boss.vy=-520; boss.jumpT=1.6; }
+  boss.shootT -= dt; if(boss.shootT<=0){ boss.shootT = (boss.hp>bossMax()*0.5? 1.1 : 0.7); fireShuriken(); }
+  if(Math.abs(player.x - boss.x) < 320) boss.vx = (player.x<boss.x ? -120:120);
+  boss.vy += GRAV*dt; if(boss.vy>MAX_FALL) boss.vy=MAX_FALL;
+  resolveX(boss, boss.vx*dt);
+  const prevY=boss.y; resolveY(boss, boss.vy*dt); boss.on = (boss.y===prevY && boss.vy===0) ? boss.on : boss.on; // implicit
+  if(AABB(player,boss)) damage(1);
+  if(player.attackT>0){
+    const sword = {x: player.x + (player.face>0?player.w:-18), y: player.y+6, w:18, h:16};
+    if(AABB(sword,boss)) hurtBoss(1);
   }
+  const prevBottom = player.y + player.h - player.vy*dt;
+  if(AABB(player,boss) && player.vy>0 && prevBottom <= boss.y+8){ hurtBoss(1); player.vy=-JUMP_V*0.7; }
 }
 
-/* ===== HUD / flow ===== */
+/* HUD / flow */
 function updateHUD(){
   HUD.hp.textContent   = 'HP: '+ '❤'.repeat(player.hp)+'♡'.repeat(Math.max(0,3-player.hp));
   HUD.coins.textContent= 'Coins: '+player.coins+'/'+totalCoins;
   HUD.power.textContent= 'Power: ' + (player.power?'Shadow x2':'—');
   HUD.key.textContent  = 'Key: ' + (player.key?'✔':'✖');
+  HUD.clan.textContent = 'Clan: ' + clan.name;
+}
+function updateStaminaBar(){
+  StamUI.fill.style.width = Math.round((player.stamina/player.maxStam)*100)+'%';
 }
 function damage(n){
   if(player.iFrames>0) return;
@@ -447,80 +474,63 @@ function damage(n){
 }
 function respawn(){
   player.x=player.spawnX; player.y=player.spawnY;
-  player.vx=player.vy=0; player.hp=3; player.iFrames=0;
+  player.vx=player.vy=0; player.hp=3; player.iFrames=0; combo=0; ComboUI.classList.add('hide');
 }
 function win(){
-  running=false;
-  UI.win.classList.remove('hide');
-  stopMusic();
+  running=false; UI.win.classList.remove('hide'); stopMusic();
 }
 function showPause(on){
-  if(on){
-    running=false; UI.pause.classList.remove('hide');
-    stopMusic();
-  }else{
-    UI.pause.classList.add('hide'); running=true;
-    if(!muted) startMusic();
-  }
+  if(on){ running=false; UI.pause.classList.remove('hide'); stopMusic(); }
+  else{ UI.pause.classList.add('hide'); running=true; if(!muted) startMusic(); }
 }
 
-/* ===== Setup level ===== */
-function recalcTotals(){
-  totalCoins=0; for(const r of Level.map) for(const v of r) if(v===3) totalCoins++;
-}
+/* Setup level */
+function recalcTotals(){ totalCoins=0; for(const r of Level.map) for(const v of r) if(v===3) totalCoins++; }
 function startLevel(def, fromSave=null){
   Level = def;
   LEVEL_W = def.w; LEVEL_H = def.h;
-  buildPlatformsForLevel();
-  buildEnemiesForLevel();
-  projectiles.length=0; boss=null;
+  buildPlatformsForLevel(); buildEnemiesForLevel();
+  projectiles.length=0; boss=null; activeCheckpoints.clear();
   recalcTotals();
 
-  // spawn
   if(fromSave){
     player.x = fromSave.x; player.y = fromSave.y;
     player.coins = fromSave.coins||0;
     player.power = !!fromSave.power; player.maxJ = fromSave.power?2:1;
     player.key = !!fromSave.key;
     player.spawnX = fromSave.x; player.spawnY = fromSave.y;
+    const savedClan = fromSave.clan; if(savedClan){ const c=CLANS.find(k=>k.name===savedClan); if(c){ clan=c; } }
   }else{
     player.x=3*TILE; player.y=(LEVEL_H-4)*TILE-28; player.coins=0; player.power=false; player.maxJ=1; player.key=false;
     player.spawnX=player.x; player.spawnY=player.y;
   }
   player.levelName = def.name;
   player.hp=3; player.vx=player.vy=0; player.iFrames=0; player.jumps=0; player.dashCd=0; player.attackT=0;
+  player.stamina=player.maxStam; player.wallCling=false;
 
-  // UI
-  UI.hud.classList.remove('hide');
-  UI.tips.classList.remove('hide');
-  UI.title.classList.add('hide');
-  UI.win.classList.add('hide');
-  UI.pause.classList.add('hide');
+  UI.hud.classList.remove('hide'); UI.tips.classList.remove('hide');
+  UI.title.classList.add('hide'); UI.win.classList.add('hide'); UI.pause.classList.add('hide');
   BossUI.wrap.style.display='none';
 
-  // camera
   cam.x = clamp(player.x - C.clientWidth*0.4, 0, Level.w*TILE - C.clientWidth);
 
-  updateHUD();
-  running=true;
-  if(!muted) startMusic();
+  updateHUD(); updateStaminaBar();
+  running=true; if(!muted) startMusic();
 }
 
-/* ===== Input toggles ===== */
+/* Input toggles */
 addEventListener('keydown', e=>{
-  if(e.key==='e' || e.key==='E'){
-    editMode = !editMode;
-    qs('#editHelp').style.display = editMode? 'block':'none';
-  }
+  if(e.key==='e' || e.key==='E'){ editMode = !editMode; qs('#editHelp').style.display = editMode? 'block':'none'; }
 });
 
-/* ===== Update ===== */
+/* Update */
+let running=false;
 function update(dt){
   if(!running) return;
 
   const left=keys.a||keys.arrowleft, right=keys.d||keys.arrowright, jump=keys[' ']||keys.space, dash=keys.shift, atk=keys.j;
 
-  player.wasOn = player.on; player.on=false;
+  player.wasOn = player.on; player.on=false; player.wallCling=false;
 
   // side accel
   const ax=(right?1:0)-(left?1:0);
@@ -532,19 +542,31 @@ function update(dt){
   }
   if(right) player.face=1; if(left) player.face=-1;
 
-  // wall probe
-  let touchingWall=false;
-  const sideX = player.x + (player.face>0?player.w+1:-1);
+  // wall probe + wall-run stamina
+  let touchingWall=false, wantTowardWall=false;
+  const toward = player.face>0? right : left;
+  const sideProbeXLeft  = player.x - 1;
+  const sideProbeXRight = player.x + player.w + 1;
   for(let y=player.y; y<player.y+player.h; y+=Math.max(1,player.h-1)){
-    if(solid(tileAt(sideX,y))){ touchingWall=true; break; }
+    if(solid(tileAt(sideProbeXLeft,y)) || solid(tileAt(sideProbeXRight,y))){ touchingWall=true; break; }
   }
-  if(!player.wasOn && touchingWall && (left||right) && player.vy>0) player.vy=Math.min(player.vy,240);
+  wantTowardWall = (left && solid(tileAt(sideProbeXLeft, player.y+2))) || (right && solid(tileAt(sideProbeXRight, player.y+2)));
+
+  if(!player.wasOn && touchingWall && wantTowardWall && player.stamina>0){
+    player.wallCling=true;
+    player.vy = Math.min(player.vy, 120);         // slow slide
+    player.stamina = Math.max(0, player.stamina - 35*dt);
+  }else{
+    const regen = player.wasOn ? 50 : 20;
+    player.stamina = Math.min(player.maxStam, player.stamina + regen*dt);
+  }
+  updateStaminaBar();
 
   // jump / double / wall
   if(jump){
     if(player.wasOn){ player.vy=-JUMP_V; player.jumps=1; keys[' ']=keys['space']=false; beep(620,.06); }
     else if(player.power && player.jumps<player.maxJ){ player.vy=-JUMP_V*0.95; player.jumps++; keys[' ']=keys['space']=false; beep(620,.06); }
-    else if(touchingWall){ player.vy=-JUMP_V*0.95; player.vx=-player.face*(RUN*0.9); keys[' ']=keys['space']=false; beep(620,.06); }
+    else if(player.wallCling && player.stamina>0){ player.vy=-JUMP_V*0.95; player.vx=-player.face*(RUN*0.9); keys[' ']=keys['space']=false; beep(620,.06); }
   }
 
   // dash
@@ -560,7 +582,7 @@ function update(dt){
 
   // integrate vs tiles
   resolveX(player, player.vx*dt);
-  resolveY(player, player.vy*dt);
+  const prevY = player.y; resolveY(player, player.vy*dt);
   if(player.on) player.jumps=0;
 
   // platforms & riders
@@ -581,19 +603,17 @@ function update(dt){
 
     if(AABB(player, e)){
       const prevBottom = player.y + player.h - player.vy*dt;
-      if(player.vy>0 && prevBottom <= e.y+6){ e.alive=false; player.vy=-JUMP_V*0.7; beep(700,.06); }
+      if(player.vy>0 && prevBottom <= e.y+6){ e.alive=false; player.vy=-JUMP_V*0.7; beep(700,.06); addCombo(1); score += 20*(1+Math.floor(combo/3)); }
       else{ damage(1); }
     }
     if(player.attackT>0){
       const sword = {x: player.x + (player.face>0?player.w:-18), y: player.y+6, w:18, h:16};
-      if(AABB(sword,e)) e.alive=false;
+      if(AABB(sword,e)){ e.alive=false; addCombo(1); score += 20*(1+Math.floor(combo/3)); }
     }
   }
 
-  // boss zone: spawn when near the gate area (far right)
-  if(!boss && player.x > (Level.w-20)*TILE){
-    spawnBoss();
-  }
+  // boss zone
+  if(!boss && player.x > (Level.w-20)*TILE){ spawnBoss(); }
   updateBoss(dt);
   updateProjectiles(dt);
 
@@ -602,6 +622,7 @@ function update(dt){
 
   // timers
   player.iFrames=Math.max(0,player.iFrames - dt);
+  tickCombo(dt);
 
   // camera
   const cw=C.clientWidth, worldW=Level.w*TILE;
@@ -609,7 +630,7 @@ function update(dt){
   cam.x += (tx - cam.x) * 0.15; cam.y=0;
 }
 
-/* ===== Render (Crimson Dusk Parallax) ===== */
+/* Render (Crimson Dusk Parallax) */
 function draw(t){
   const cw=C.clientWidth, ch=C.clientHeight;
   // sky gradient
@@ -625,7 +646,7 @@ function draw(t){
   drawHills('#4a1a24', 0.16,  80);
   drawHills('#642233', 0.28,  48);
 
-  // visible tiles
+  // tiles
   const startTx=Math.floor(cam.x/TILE), endTx=Math.ceil((cam.x+cw)/TILE);
   for(let ty=0; ty<LEVEL_H; ty++){
     for(let tx=startTx; tx<Math.min(endTx,LEVEL_W); tx++){
@@ -638,7 +659,16 @@ function draw(t){
       if(id===5){ g.fillStyle='#c0ffb3'; g.fillRect(x+20,y-100,6,100); g.fillStyle='#45fd6c'; g.beginPath(); g.moveTo(x+26,y-96); g.lineTo(x+80,y-76); g.lineTo(x+26,y-56); g.closePath(); g.fill(); }
       if(id===6){ g.fillStyle='#7ce8ff'; g.fillRect(x+10,y+10,12,12); }
       if(id===7){ g.fillStyle='#9b6bff'; g.fillRect(x+4,y+10,TILE-8,8); }
-      if(id===9){ g.fillStyle='#ff8a7a'; g.fillRect(x+10,y+6,12,20); }
+      if(id===9){
+        // clan-colored checkpoint if activated
+        const k=keyFor(tx,ty);
+        g.fillStyle = activeCheckpoints.has(k)? clan.color : '#ff8a7a';
+        g.fillRect(x+10,y+6,12,20);
+        if(activeCheckpoints.has(k)){
+          g.fillStyle = clan.color;
+          g.beginPath(); g.moveTo(x+22,y+6); g.lineTo(x+50,y+18); g.lineTo(x+22,y+30); g.closePath(); g.fill();
+        }
+      }
       if(id===10){ g.fillStyle='#3a1a24'; g.fillRect(x+2,y+2,TILE-4,TILE-4); }
       if(id===11){ g.fillStyle='#ffd37a'; g.fillRect(x+8,y+8,16,16); }
     }
@@ -654,16 +684,9 @@ function draw(t){
     g.fillRect(Math.floor(e.x-cam.x), Math.floor(e.y-cam.y), e.w, e.h);
   }
 
-  // boss
-  if(boss){
-    g.fillStyle='#ffb3b3';
-    g.fillRect(Math.floor(boss.x-cam.x), Math.floor(boss.y-cam.y), boss.w, boss.h);
-  }
-  // shuriken
-  g.fillStyle='#ffd27a';
-  for(const p of projectiles){
-    g.fillRect(Math.floor(p.x-cam.x)-3, Math.floor(p.y-cam.y)-3, 6,6);
-  }
+  // boss & shuriken
+  if(boss){ g.fillStyle='#ffb3b3'; g.fillRect(Math.floor(boss.x-cam.x), Math.floor(boss.y-cam.y), boss.w, boss.h); }
+  g.fillStyle='#ffd27a'; for(const p of projectiles){ g.fillRect(Math.floor(p.x-cam.x)-3, Math.floor(p.y-cam.y)-3, 6,6); }
 
   // player (blink on iFrames)
   if(!(player.iFrames>0 && ((t*10|0)%2===0))){
@@ -704,21 +727,21 @@ function drawGrid(){
   }
 }
 
-/* ===== Loop ===== */
-let last=performance.now(), running=false;
+/* Loop */
+let last=performance.now(), raf;
 function loop(now){
   const dt=Math.min(50, now-last)/1000; last=now;
   if(running) update(dt);
   draw(now/1000);
-  requestAnimationFrame(loop);
+  raf=requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
 
-/* ===== Utils ===== */
+/* Utils */
 function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
 function AABB(a,b){ return a.x<b.x+b.w && a.x+a.w>b.x && a.y<b.y+b.h && a.y+a.h>b.y; }
 
-/* ===== Menu wiring ===== */
+/* Menu wiring */
 const contBtn = qs('#contBtn');
 const haveSave = !!loadSave();
 if(haveSave){ contBtn.disabled=false; }
@@ -732,19 +755,12 @@ contBtn.onclick = ()=>{
   startLevel(def, s);
 };
 
-/* ===== Win & Pause buttons ===== */
+/* Win & Pause buttons */
 qs('#again').onclick = ()=>{ startLevel(Level); if(!muted) startMusic(); };
 qs('#menu').onclick  = ()=>{ running=false; UI.title.classList.remove('hide'); UI.win.classList.add('hide'); UI.hud.classList.add('hide'); UI.tips.classList.add('hide'); stopMusic(); };
 qs('#resumeBtn').onclick  = ()=> showPause(false);
 qs('#restartBtn').onclick = ()=>{ showPause(false); startLevel(Level); };
 qs('#menuBtn').onclick    = ()=>{ showPause(false); running=false; UI.title.classList.remove('hide'); UI.hud.classList.add('hide'); UI.tips.classList.add('hide'); stopMusic(); };
-
-/* ===== Editor toggle ===== */
-addEventListener('keydown', e=>{
-  if(e.key==='E' || e.key==='e'){
-    // handled earlier; this just keeps the hint visible
-  }
-});
 </script>
 </body>
 </html>
