@@ -1,128 +1,380 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no"/>
-  <title>Ninja Worlds — v0.8 (Fixed Gravity)</title>
-  <meta name="theme-color" content="#0b0d12">
-  <style>
-    body, html { margin: 0; height: 100%; background: #0b0d12; color: white; }
-    canvas { display: block; width: 100%; height: 100%; }
-  </style>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no"/>
+<title>Ninja Worlds — v0.9 (Crimson Dusk)</title>
+<meta name="theme-color" content="#8A2232">
+<style>
+  :root{--ui:rgba(255,255,255,.92);--ink:#0b0d12}
+  html,body{margin:0;height:100%;background:#0b0d12;color:#fff;font:14px/1.1 system-ui,-apple-system,Segoe UI,Inter,sans-serif;overscroll-behavior:none}
+  canvas{position:fixed;inset:0;touch-action:none;display:block;outline:none}
+
+  /* HUD */
+  #hud{position:fixed;inset:0;pointer-events:none}
+  .row{position:absolute;top:12px;left:12px;right:12px;display:flex;gap:10px;align-items:center;justify-content:space-between}
+  .badge{background:rgba(0,0,0,.55);padding:8px 12px;border-radius:12px;font-weight:600}
+  .btn{pointer-events:auto;border:0;border-radius:10px;padding:10px 14px;font-weight:800;background:var(--ui);color:#000;min-width:86px}
+
+  /* Dialogs */
+  .dialog{position:fixed;inset:0;background:rgba(10,12,16,.42);backdrop-filter:blur(6px);display:grid;place-items:center}
+  .panel{background:rgba(20,22,28,.9);border:1px solid rgba(255,255,255,.15);padding:18px 20px;border-radius:12px;min-width:260px}
+  .panel h2{margin:.2em 0 8px;font:700 18px system-ui}
+  .panel p{opacity:.85;margin:.2em 0 10px}
+  .hidden{display:none}
+
+  /* Touch controls */
+  .touch{position:fixed;bottom:16px;left:16px;right:16px;display:none;justify-content:space-between;align-items:flex-end;gap:12px;pointer-events:none}
+  .pad{display:flex;gap:12px;pointer-events:auto}
+  .tbtn{width:68px;height:68px;border-radius:999px;border:0;background:rgba(255,255,255,.12);backdrop-filter:blur(6px);
+        color:#fff;font:700 14px system-ui;display:grid;place-items:center;box-shadow:inset 0 0 0 2px rgba(255,255,255,.15)}
+  .tbtn:active{transform:scale(.97)}
+  .lg{width:80px;height:80px}
+  @media (max-width: 820px){ .touch{display:flex} }
+</style>
 </head>
 <body>
-<canvas id="game"></canvas>
+
+<canvas id="game" aria-label="Ninja Worlds"></canvas>
+
+<!-- HUD -->
+<div id="hud">
+  <div class="row">
+    <div style="display:flex;gap:8px;align-items:center">
+      <div id="hp"    class="badge">HP: ❤❤❤</div>
+      <div id="coins" class="badge">Coins: 0</div>
+      <div id="chip"  class="badge" style="opacity:.75">booting…</div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button id="perf"  class="btn">Low-Perf: OFF</button>
+      <button id="pause" class="btn">Pause</button>
+    </div>
+  </div>
+</div>
+
+<!-- Touch Controls -->
+<div id="touch" class="touch">
+  <div class="pad">
+    <button id="tLeft"  class="tbtn lg">◀︎</button>
+    <button id="tRight" class="tbtn lg">▶︎</button>
+  </div>
+  <div class="pad">
+    <button id="tJump"  class="tbtn lg">⤴︎</button>
+    <button id="tDash"  class="tbtn">Dash</button>
+    <button id="tAtk"   class="tbtn">Atk</button>
+  </div>
+</div>
+
+<!-- START / PAUSE / END -->
+<div id="start" class="dialog">
+  <div class="panel">
+    <h2>Ninja Worlds — v0.9</h2>
+    <p>WASD/Arrows · Jump: Space · Dash: Shift · Attack: J · Pause: P</p>
+    <div style="display:flex;gap:8px">
+      <button id="new"  class="btn">Play</button>
+      <button id="cont" class="btn" disabled>Continue</button>
+    </div>
+  </div>
+</div>
+<div id="pauseDlg" class="dialog hidden">
+  <div class="panel"><h2>Paused</h2><p>Press any key / tap to resume.</p><button id="resume" class="btn">Resume</button></div>
+</div>
+<div id="winDlg" class="dialog hidden">
+  <div class="panel"><h2>You Win!</h2><button id="playAgainWin" class="btn">Play Again</button></div>
+</div>
+<div id="gameOverDlg" class="dialog hidden">
+  <div class="panel"><h2>Game Over</h2><button id="playAgainLose" class="btn">Try Again</button></div>
+</div>
+
 <script>
-// Game variables
-const canvas = document.getElementById('game');
-const ctx = canvas.getContext('2d');
-
-// Game parameters
-const GRAVITY = 0.8; // Gravity force
-const FRICTION = 0.9; // Player friction when standing still
-const MOVE_SPEED = 4;
-const JUMP_FORCE = -15;
-
-// Player object
-const player = {
-  x: 100,
-  y: 200,
-  width: 30,
-  height: 50,
-  vx: 0,
-  vy: 0,
-  onGround: false,
-  color: '#ffffff',
-};
-
-// Platform array (for ground and obstacles)
-const platforms = [
-  { x: 0, y: canvas.height - 50, width: canvas.width, height: 50 }, // ground
-  { x: 300, y: 400, width: 200, height: 20 }, // floating platform
-];
-
-// Resize canvas to fit the screen
-function resizeCanvas() {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-}
-resizeCanvas();
-window.addEventListener('resize', resizeCanvas);
-
-// Gravity and collision detection functions
-function applyGravity() {
-  if (!player.onGround) {
-    player.vy += GRAVITY;
-  } else {
-    player.vy = 0;
-  }
+/* ===== utils ===== */
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const AABB=(a,b)=>a.x<b.x+b.w && a.x+a.w>b.x && a.y<b.y+b.h && a.y+a.h>b.y;
+function beep(freq=880, dur=0.08){
+  try{ const AC=window.AudioContext||window.webkitAudioContext; if(!AC) return;
+    if(!window._ac) window._ac=new AC(); const ac=_ac,o=ac.createOscillator(),g=ac.createGain();
+    o.type='square'; o.frequency.value=freq; g.gain.value=0.05; o.connect(g); g.connect(ac.destination);
+    o.start(); o.stop(ac.currentTime+dur);
+  }catch(_){}
 }
 
-function checkCollisions() {
-  player.onGround = false;
+/* ===== globals ===== */
+let L=null, running=false, lowPerf=false;
+const P={x:80,y:220,w:28,h:40,vx:0,vy:0,face:1,on:false,_wasOn:false,jumps:0,maxJ:1,dashCd:0,hp:3,iFrames:0,coins:0};
+const cam={x:0,y:0,shake:0};
+const MOVE={RUN:260,AIR_ACCEL:1100,RUN_DECEL:2400,JUMP_V:420,GRAV:980};
+let COYOTE=0,JBUF=0; const COYOTE_TIME=0.08,JUMP_BUF=0.10;
+const CAM_LERP=0.12, CAM_OFFSET=0.38;
+const FX=[]; let slashTimer=0;
 
-  // Check for collisions with platforms
-  for (const platform of platforms) {
-    if (player.x + player.width > platform.x && player.x < platform.x + platform.width &&
-      player.y + player.height <= platform.y && player.y + player.height + player.vy >= platform.y) {
-      player.y = platform.y - player.height;
-      player.onGround = true;
+/* ===== input ===== */
+const keys=Object.create(null);
+function createInput(canvas){
+  const touch = 'ontouchstart' in window || navigator.maxTouchPoints>0;
+  addEventListener('keydown',e=>{ const k=e.key.toLowerCase(); keys[k]=true; if(e.key===' ') e.preventDefault(); if(k==='p') togglePause(); });
+  addEventListener('keyup',  e=>{ keys[e.key.toLowerCase()]=false; });
+  canvas.addEventListener('pointerdown',()=>canvas.focus());
+  return touch;
+}
+function enableTouchControls(){
+  const tc=document.getElementById('touch'); tc.style.display='flex';
+  const bind=(el,down,up)=>{ el.addEventListener('pointerdown',e=>{e.preventDefault();down();});
+                             ['pointerup','pointercancel','pointerleave'].forEach(t=>el.addEventListener(t,e=>{e.preventDefault();up();})); };
+  bind(document.getElementById('tLeft'), ()=>{keys['arrowleft']=keys['a']=true;}, ()=>{keys['arrowleft']=keys['a']=false;});
+  bind(document.getElementById('tRight'),()=>{keys['arrowright']=keys['d']=true;}, ()=>{keys['arrowright']=keys['d']=false;});
+  bind(document.getElementById('tJump'), ()=>{keys[' ']=keys['space']=true;},      ()=>{keys[' ']=keys['space']=false;});
+  bind(document.getElementById('tDash'), ()=>{keys['shift']=true;},                 ()=>{keys['shift']=false;});
+  bind(document.getElementById('tAtk'),  ()=>{keys['j']=true;},                    ()=>{keys['j']=false;});
+}
+
+/* ===== level ===== */
+/* IMPORTANT: We compute and draw in CSS pixels (no devicePixelRatio scaling) to keep collisions exact. */
+function buildLevel(){
+  const solids=[], enemies=[], coins=[];
+  const W=2600, GH = Math.round(innerHeight*0.82);
+
+  const addS=(x,y,w,h)=>solids.push({x,y,w,h});
+  const addCoin=(x,y)=>coins.push({x,y,w:18,h:18,t:0});
+
+  // floor + platforms
+  addS(0, GH, W, 22);
+  addS(160, GH-120, 220, 18);
+  addS(520, GH-200, 260, 18);
+  addS(940, GH-140, 200, 18);
+  addS(1320, GH-220, 260, 18);
+  addS(1780, GH-140, 200, 18);
+  addS(2100, GH-200, 220, 18);
+
+  // coins
+  for(let i=0;i<10;i++) addCoin(240+i*180, GH-160+(i&1?-30:0));
+
+  // enemies
+  for(let i=0;i<4;i++) enemies.push({x:620+i*360,y:GH-64,w:44,h:44,vx:0,vy:0,t:0,type:(i%2?'ronin':'monk')});
+
+  const portal={x:W-140,y:GH-160,w:46,h:128};
+  return {solids,enemies,coins,portal,width:W,groundY:GH};
+}
+
+/* ===== rendering ===== */
+function drawLevel(g,c,l,now){
+  const cw=c.width, ch=c.height;
+
+  // Crimson Dusk animated sky
+  const wobble=Math.sin(now*0.35)*16;
+  const grad=g.createLinearGradient(0,ch+wobble,0,0);
+  grad.addColorStop(0.08,"#8A2232");
+  grad.addColorStop(0.33,"#9B2D3B");
+  grad.addColorStop(0.66,"#A33C44");
+  grad.addColorStop(1.00,"#FFB37E");
+  g.fillStyle=grad; g.fillRect(0,0,cw,ch);
+
+  // soft sun glow
+  g.save();
+  const sunX=(cw*0.62)-(cam.x*0.05), sunY=ch*0.82;
+  const sunG=g.createRadialGradient(sunX,sunY,0,sunX,sunY,140);
+  sunG.addColorStop(0,"rgba(255,179,126,.28)");
+  sunG.addColorStop(1,"rgba(255,179,126,0)");
+  g.fillStyle=sunG; g.beginPath(); g.arc(sunX,sunY,140,0,Math.PI*2); g.fill();
+  g.restore();
+
+  // ground/platforms
+  g.fillStyle="#2b1b1b";
+  for(const s of l.solids) g.fillRect(s.x-cam.x, s.y-cam.y, s.w, s.h);
+
+  // coins
+  for(const C of l.coins){ g.save(); g.globalAlpha=.95; g.beginPath(); g.arc(C.x-cam.x, C.y-cam.y, 7, 0, Math.PI*2); g.fillStyle="#FFD27A"; g.fill(); g.restore(); }
+
+  // portal
+  const p=l.portal, pg=g.createLinearGradient(p.x-cam.x,p.y,p.x-cam.x,p.y+p.h);
+  pg.addColorStop(0,"#6a5acd"); pg.addColorStop(1,"#9370db");
+  g.fillStyle=pg; g.fillRect(p.x-cam.x, p.y-cam.y, p.w, p.h);
+
+  // slash flash
+  if(slashTimer>0){ g.fillStyle="rgba(255,255,255,.22)"; const r=attackHitbox(); g.fillRect(r.x-cam.x,r.y-cam.y,r.w,r.h); }
+
+  // player aura + body
+  if(P.iFrames>0){ g.save(); g.globalAlpha=.35; g.fillStyle="#FFD6A6"; g.fillRect(P.x-cam.x-6,P.y-cam.y-6,P.w+12,P.h+12); g.restore(); }
+  g.fillStyle="#FFECEF"; g.fillRect(P.x-cam.x,P.y-cam.y,P.w,P.h);
+
+  // enemies
+  for(const E of l.enemies){ g.fillStyle=E.type==='ronin'?'#ff6e6e':'#7aa6ff'; g.fillRect(E.x-cam.x,E.y-cam.y,E.w,E.h); }
+
+  // particles
+  g.fillStyle="#ffffff";
+  for(const pfx of FX){ g.globalAlpha=1-Math.min(1,pfx.t/pfx.life); g.fillRect(pfx.x-cam.x, pfx.y-cam.y, 2, 2); }
+  g.globalAlpha=1;
+}
+
+/* ===== HUD ===== */
+function setHUD(){
+  const hpEl=document.getElementById('hp'), coinEl=document.getElementById('coins');
+  hpEl.textContent='HP: '+'❤'.repeat(P.hp)+'♡'.repeat(Math.max(0,3-P.hp));
+  coinEl.textContent='Coins: '+(P.coins|0);
+}
+
+/* ===== collisions ===== */
+/* Robust step: move X, resolve; then move Y, resolve. Prevents tunneling through floors. */
+function resolveAxis(box, solids, axis, delta){
+  box[axis]+=delta;
+  for(const s of solids){
+    if(!AABB(box,s)) continue;
+    if(axis==='x'){
+      if(delta>0) box.x = s.x - box.w; else box.x = s.x + s.w;
+      box.vx = 0;
+    }else{ // y
+      if(delta>0){ // moving down
+        box.y = s.y - box.h; box.vy=0; box.on=true; box.jumps=0;
+        if(!box._wasOn){ cam.shake=Math.max(cam.shake,3); FX.push({x:box.x+box.w/2,y:box.y+box.h,t:0,life:.3}); beep(180,.03); }
+      }else{ // moving up
+        box.y = s.y + s.h; if(box.vy<0) box.vy=0;
+      }
     }
   }
 }
 
-function movePlayer() {
-  if (keys['ArrowLeft'] || keys['a']) player.vx = -MOVE_SPEED;
-  else if (keys['ArrowRight'] || keys['d']) player.vx = MOVE_SPEED;
-  else player.vx *= FRICTION;
+/* ===== gameplay ===== */
+function attackHitbox(){ const w=34,h=28,ox=P.face>0?P.w:-w; return {x:P.x+ox,y:P.y+(P.h-h)/2,w,h}; }
+function hitPlayer(dmg){ if(P.iFrames>0||dmg<=0) return; P.hp=Math.max(0,P.hp-dmg); P.iFrames=1.0; P.vy=-220; cam.shake=Math.max(cam.shake,6); beep(220,.06); if(P.hp===0) gameOver(); }
+function gameOver(){ running=false; document.getElementById('gameOverDlg').classList.remove('hidden'); }
+function winLevel(){ running=false; document.getElementById('winDlg').classList.remove('hidden'); }
 
-  player.x += player.vx;
-  player.y += player.vy;
+/* ===== update ===== */
+function update(dt){
+  P._wasOn=P.on; P.on=false;
+  COYOTE=Math.max(0, (P._wasOn?COYOTE_TIME:COYOTE)-dt);
+  JBUF=Math.max(0, JBUF-dt);
+  P.iFrames=Math.max(0,P.iFrames-dt);
+  slashTimer=Math.max(0,slashTimer-dt);
+  cam.shake=Math.max(0,cam.shake-dt*8);
 
-  // Boundary checks
-  if (player.x < 0) player.x = 0;
-  if (player.x + player.width > canvas.width) player.x = canvas.width - player.width;
-}
+  // input
+  const left=keys['a']||keys['arrowleft'], right=keys['d']||keys['arrowright'], jump=keys[' ']||keys['space'], dash=keys['shift'], atk=keys['j'];
+  if(jump && JBUF<=0) JBUF=JUMP_BUF;
 
-function jump() {
-  if (player.onGround) {
-    player.vy = JUMP_FORCE;
-  }
-}
+  // horizontal accel
+  const ax=(right?1:0)-(left?1:0);
+  P.vx += ax * (P.on? MOVE.RUN*10 : MOVE.AIR_ACCEL) * dt;
+  P.vx = clamp(P.vx, -MOVE.RUN, MOVE.RUN);
+  if(ax===0 && P.on){ const stop=Math.sign(P.vx)*Math.min(Math.abs(P.vx),MOVE.RUN_DECEL*dt); P.vx-=stop; }
+  if(right) P.face=1; if(left) P.face=-1;
 
-// Handle user input for player movement
-const keys = {};
-window.addEventListener('keydown', (e) => {
-  keys[e.key.toLowerCase()] = true;
-  if (e.key.toLowerCase() === ' ') jump();
-});
-window.addEventListener('keyup', (e) => {
-  keys[e.key.toLowerCase()] = false;
-});
+  // jump (coyote & buffer)
+  if(JBUF>0 && (COYOTE>0 || P.jumps<P.maxJ)){ P.vy=-MOVE.JUMP_V; P.jumps++; JBUF=0; keys[' ']=keys['space']=false; beep(660,.06); }
+  if((!keys[' ']&&!keys['space']) && P.vy<-120) P.vy=-120;
 
-// Game loop
-function gameLoop() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height); // Clear canvas
+  // dash
+  if(dash && P.dashCd<=0){ P.vx += 360*P.face; P.dashCd=.35; cam.shake=Math.max(cam.shake,2); beep(440,.05); }
+  P.dashCd=Math.max(0,P.dashCd-dt);
 
-  // Apply physics
-  applyGravity();
-  checkCollisions();
-  movePlayer();
-
-  // Draw player
-  ctx.fillStyle = player.color;
-  ctx.fillRect(player.x, player.y, player.width, player.height);
-
-  // Draw platforms
-  ctx.fillStyle = 'green';
-  for (const platform of platforms) {
-    ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+  // attack
+  if(atk){
+    const hit=attackHitbox();
+    for(let i=L.enemies.length-1;i>=0;i--){
+      const E=L.enemies[i];
+      if(AABB(hit,{x:E.x,y:E.y,w:E.w,h:E.h})){ L.enemies.splice(i,1); beep(520,.07); cam.shake=Math.max(cam.shake,5); }
+    }
+    slashTimer=.12; keys['j']=false;
   }
 
-  requestAnimationFrame(gameLoop); // Loop the game
+  // gravity
+  P.vy += MOVE.GRAV*dt;
+
+  // integrate with axis resolution
+  resolveAxis(P, L.solids, 'x', P.vx*dt);
+  resolveAxis(P, L.solids, 'y', P.vy*dt);
+
+  // keep bounds / death pit
+  P.x = clamp(P.x, 0, L.width-P.w);
+  if(P.y > L.groundY + 400) hitPlayer(3);
+
+  // enemies
+  for(const E of L.enemies){
+    E.t+=dt; const patrol=Math.sin(E.t*.8)*40; const dx=P.x-E.x; const chase=Math.abs(dx)<260?Math.sign(dx)*60:0;
+    E.vx=(patrol+chase)*dt*6; E.x += E.vx*dt;
+    if(E.y < L.groundY - E.h){ E.vy=(E.vy||0)+MOVE.GRAV*dt; E.y+=E.vy*dt; } else { E.y=L.groundY-E.h; E.vy=0; }
+    if(AABB({x:P.x,y:P.y,w:P.w,h:P.h},{x:E.x,y:E.y,w:E.w,h:E.h})) hitPlayer(1);
+  }
+
+  // coins
+  for(let i=L.coins.length-1;i>=0;i--){
+    const C=L.coins[i];
+    if(AABB({x:P.x,y:P.y,w:P.w,h:P.h},{x:C.x-8,y:C.y-8,w:16,h:16})){
+      L.coins.splice(i,1); P.coins++; beep(880,.04);
+    }
+  }
+
+  // portal
+  if(AABB({x:P.x,y:P.y,w:P.w,h:P.h}, L.portal)) winLevel();
+
+  // particles lifetime
+  for(let i=FX.length-1;i>=0;i--){ const p=FX[i]; p.t+=dt; if(p.t>=p.life) FX.splice(i,1); }
+
+  // camera follow (CSS px)
+  const cw = canvas.width;
+  const targetX = clamp(P.x - cw*CAM_OFFSET, 0, L.width - cw);
+  cam.x += (targetX - cam.x)*CAM_LERP; cam.y=0;
+
+  // HUD
+  setHUD();
 }
 
-gameLoop(); // Start the game loop
+/* ===== loop & boot ===== */
+function togglePause(){ if(!running){ document.getElementById('pauseDlg').classList.add('hidden'); running=true; } else { document.getElementById('pauseDlg').classList.remove('hidden'); running=false; } }
+
+const canvas=document.getElementById('game'), g=canvas.getContext('2d');
+function resize(){ canvas.width=innerWidth; canvas.height=innerHeight; }
+resize(); addEventListener('resize',()=>{ resize(); if(L){ L=buildLevel(); P.y=L.groundY-P.h-2; } });
+
+function boot(){
+  if(createInput(canvas)) enableTouchControls();
+  L=buildLevel();
+  // spawn & camera
+  P.x=80; P.y=L.groundY-P.h-2;
+  cam.x = Math.max(0, P.x - (canvas.width*CAM_OFFSET)); cam.y=0;
+  running=true;
+
+  const chip=document.getElementById('chip'), perfBtn=document.getElementById('perf'), pauseBtn=document.getElementById('pause'), resume=document.getElementById('resume');
+
+  let last=performance.now(), fpsF=0,fps=0,acc=0;
+  function frame(now){
+    const dt=Math.min(50, now-last)/1000; last=now;
+    if(running) update(dt);
+    if(!lowPerf || (lowPerf && (fpsF%2===0))) drawLevel(g,canvas,L,now/1000);
+    fpsF++; acc+=dt; if(acc>=1){ fps=fpsF; fpsF=0; acc=0; }
+    chip.textContent=`FPS: ${fps} | enemies: ${L.enemies.length}`;
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  perfBtn.onclick=()=>{ lowPerf=!lowPerf; perfBtn.textContent='Low-Perf: '+(lowPerf?'ON':'OFF'); };
+  pauseBtn.onclick=togglePause; resume.onclick=togglePause;
+}
+boot();
+
+/* ===== start flow (audio unlock + overlay) ===== */
+document.addEventListener('DOMContentLoaded', ()=>{
+  const canvas=document.getElementById('game'), overlay=document.getElementById('start');
+  const playBtn=document.getElementById('new'), contBtn=document.getElementById('cont');
+  const againW=document.getElementById('playAgainWin'), againL=document.getElementById('playAgainLose');
+
+  canvas.setAttribute('tabindex','0');
+  let audioUnlocked=false;
+  function unlockAudioOnce(){
+    if(audioUnlocked) return;
+    const AC=window.AudioContext||window.webkitAudioContext;
+    if(AC){ if(!window._ac) window._ac=new AC(); if(_ac.state==='suspended'){ try{_ac.resume();}catch(_){}} }
+    audioUnlocked=true;
+  }
+  function startFromUI(){ unlockAudioOnce(); overlay.classList.add('hidden'); overlay.style.display='none'; try{ canvas.focus(); }catch(_){} }
+
+  playBtn.addEventListener('click', startFromUI, true);
+  contBtn.addEventListener('click', startFromUI, true);
+  againW.addEventListener('click', ()=>location.reload());
+  againL.addEventListener('click', ()=>location.reload());
+  addEventListener('pointerdown', startFromUI, {once:true});
+  addEventListener('keydown',     startFromUI, {once:true});
+  canvas.addEventListener('click', ()=>{ try{ canvas.focus(); }catch(_){ } });
+});
 </script>
 </body>
 </html>
