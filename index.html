@@ -1,385 +1,365 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no"/>
-<title>Ninja Worlds — Phaser Base (Crimson Dusk)</title>
+<title>Ninja Worlds — Crimson Base</title>
 <style>
-  html,body{margin:0;height:100%;background:#0b0a0f;color:#fff;font:14px/1.15 system-ui,-apple-system,Segoe UI,Inter}
-  #game{width:100vw;height:100vh;display:block}
-  /* Touch controls */
-  .touch{position:fixed;left:12px;right:12px;bottom:14px;display:none;justify-content:space-between;align-items:flex-end;gap:12px;z-index:9999}
-  .pad{display:flex;gap:12px}
-  .tbtn{width:78px;height:78px;border-radius:999px;border:0;background:rgba(255,255,255,.12);backdrop-filter:blur(8px);
-        color:#fff;font:800 16px system-ui;display:grid;place-items:center;box-shadow:inset 0 0 0 2px rgba(255,255,255,.16)}
-  .tbtn:active{transform:scale(.97)}
-  .lg{width:92px;height:92px}
-  @media (max-width: 820px){ .touch{display:flex} }
+  html,body{margin:0;height:100%;background:#1a0f0f;color:#fff;font:14px/1.2 system-ui,-apple-system,Segoe UI,Inter}
+  #game{display:block;width:100vw;height:100vh;touch-action:none;background:#1a0f0f}
+  /* HUD */
+  #hud{position:fixed;left:12px;top:10px;display:flex;gap:10px;z-index:5}
+  .badge{background:rgba(0,0,0,.55);padding:6px 10px;border-radius:10px;font-weight:800}
+  /* Title overlay */
+  #title{position:fixed;inset:0;display:grid;place-items:center;background:rgba(0,0,0,.42);backdrop-filter:blur(8px);z-index:10}
+  .panel{background:rgba(30,18,18,.92);border:1px solid rgba(255,255,255,.15);padding:18px 22px;border-radius:14px;min-width:280px;text-align:center}
+  .panel h1{margin:.25em 0 10px;font:800 22px/1.2 system-ui}
+  .btn{border:0;border-radius:10px;padding:10px 16px;font-weight:800;background:#fff;color:#000;cursor:pointer}
+  .hide{display:none}
 </style>
 </head>
 <body>
-<div id="game"></div>
+<canvas id="game"></canvas>
 
-<!-- Touch Controls -->
-<div class="touch" id="touch">
-  <div class="pad">
-    <button id="tLeft"  class="tbtn lg">◀︎</button>
-    <button id="tRight" class="tbtn lg">▶︎</button>
-  </div>
-  <div class="pad">
-    <button id="tJump"  class="tbtn lg">⤴︎</button>
+<!-- HUD -->
+<div id="hud" class="hide">
+  <div id="hp" class="badge">HP: ❤❤❤</div>
+  <div id="coins" class="badge">Coins: 0</div>
+</div>
+
+<!-- Title / Play -->
+<div id="title">
+  <div class="panel">
+    <h1>Ninja Worlds — Crimson Base</h1>
+    <p style="opacity:.9;margin:0 0 12px">Move: A/D or Arrows · Jump: Space · Pause: P/Esc</p>
+    <button id="playBtn" class="btn">Play</button>
   </div>
 </div>
 
-<!-- Phaser -->
-<script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
 <script>
-/* ================= Tuning (SMB-ish) ================= */
-const PHYS = {
-  RUN_MAX: 240,           // top ground speed
-  ACCEL:   1400,          // ground acceleration
-  DECEL:   2200,          // ground deceleration
-  AIR_ACCEL: 1000,        // air acceleration
-  AIR_DECEL:  400,        // air braking
-  JUMP_V:   370,          // initial jump velocity (up)
-  GRAV_UP:  820,          // gravity while rising (low for floaty start)
-  GRAV_DOWN:1400,         // gravity while falling (snappy)
-  CUT_V:    -140,         // cap when releasing jump for variable height
-  MAX_FALL: 560,          // terminal velocity
-  COYOTE:   0.10,         // seconds after leaving ground you can still jump
-  JBUF:     0.14          // seconds of jump buffering
+/* ===== Canvas setup (CSS pixels) ===== */
+const C = document.getElementById('game'), g = C.getContext('2d');
+function resize(){
+  const dpr = devicePixelRatio || 1;
+  C.width  = Math.round(innerWidth  * dpr);
+  C.height = Math.round(innerHeight * dpr);
+  C.style.width  = innerWidth +'px';
+  C.style.height = innerHeight+'px';
+  g.setTransform(dpr,0,0,dpr,0,0);
+}
+resize(); addEventListener('resize', resize);
+
+/* ===== Small helpers ===== */
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const AABB=(a,b)=>a.x<b.x+b.w && a.x+a.w>b.x && a.y<b.y+b.h && a.y+a.h>b.y;
+function beep(f=660,d=.05){
+  try{
+    const AC = window.AudioContext||window.webkitAudioContext; if(!AC) return;
+    if(!window._ac) window._ac = new AC();
+    const ac=window._ac, o=ac.createOscillator(), v=ac.createGain();
+    o.type='square'; o.frequency.value=f; v.gain.value=.04; o.connect(v); v.connect(ac.destination);
+    o.start(); o.stop(ac.currentTime+d);
+  }catch(_){}
+}
+
+/* ===== World / Level ===== */
+const TILE=32;
+const Level = { w:160, h:20, map:[] }; // simple 2D array level
+function makeLevel(){
+  // ground band + a few gaps + platforms + coins
+  const W=Level.w, H=Level.h;
+  Level.map.length=0;
+  for(let y=0;y<H;y++){
+    const row=new Array(W).fill(0);
+    if(y>=H-3) row.fill(1); // ground band (solid id=1)
+    Level.map.push(row);
+  }
+  // carve ground gaps (little pits)
+  for(const x of [18,19,20, 54,55, 92,93]) Level.map[H-3][x]=0;
+
+  // some bricks (id=2) as platforms
+  function plat(tx,ty,len){ for(let i=0;i<len;i++) if(Level.map[ty]) Level.map[ty][tx+i]=2; }
+  plat(10, H-6, 6);
+  plat(28, H-8, 6);
+  plat(46, H-10,6);
+  plat(64, H-7, 6);
+  plat(82, H-9, 6);
+  plat(104,H-11,6);
+
+  // coins (id=3)
+  function coin(tx,ty){ if(Level.map[ty]) Level.map[ty][tx]=3; }
+  coin(12,H-7); coin(30,H-9); coin(48,H-11); coin(66,H-8); coin(84,H-10); coin(106,H-12);
+
+  // spikes (id=4)
+  Level.map[H-4][60]=4; Level.map[H-4][61]=4; Level.map[H-4][62]=4;
+
+  // flag (id=5) = win
+  Level.map[H-4][W-6]=5;
+}
+makeLevel();
+
+const isSolid  = id => id===1 || id===2;
+const isDeadly = id => id===4;
+
+/* robust tile lookup (CSS px) */
+function tileAt(px,py){
+  const tx=Math.floor(px/TILE), ty=Math.floor(py/TILE);
+  if(ty<0||ty>=Level.h||tx<0||tx>=Level.w) return 0;
+  return Level.map[ty][tx] | 0;
+}
+
+/* ===== Entities ===== */
+const player = {
+  x:3*TILE, y:(Level.h-4)*TILE-28, w:22, h:28,
+  vx:0, vy:0, face:1,
+  on:false, jumps:0,
+  hp:3, coins:0
 };
+const cam = {x:0,y:0};
 
-/* ===== Simple input map (desktop + touch) ===== */
-const Input = { left:false, right:false, jump:false, jumpPressed:false };
-(function setupTouch(){
-  const t = document.getElementById('touch');
-  if(!('ontouchstart' in window || navigator.maxTouchPoints>0)) return;
-  t.style.display='flex';
-  const bind = (id, set) => {
-    const el = document.getElementById(id);
-    const press = e=>{ e.preventDefault(); set(true); };
-    const lift  = e=>{ e.preventDefault(); set(false); };
-    ['pointerdown','touchstart','mousedown'].forEach(ev=>el.addEventListener(ev,press));
-    ['pointerup','pointercancel','touchend','mouseleave','mouseup'].forEach(ev=>el.addEventListener(ev,lift));
-  };
-  bind('tLeft',  v=>Input.left=v);
-  bind('tRight', v=>Input.right=v);
-  bind('tJump',  v=>{ if(v){ Input.jump=true; Input.jumpPressed=true; } else { Input.jump=false; } });
-})();
+const enemies = []; // simple walkers
+function addWalker(tx,ty,dir=1){ enemies.push({x:tx*TILE+6,y:ty*TILE-26,w:20,h:26,vx:60*dir,vy:0,alive:true}); }
+for(let i=14;i<Level.w-10;i+=16) addWalker(i, Level.h-3);
 
-/* ================= Boot assets (generated) ================= */
-class Boot extends Phaser.Scene{
-  constructor(){ super('boot'); }
-  preload(){
-    // Create simple textures by drawing to a graphics object
-    const g = this.make.graphics({x:0,y:0,add:false});
-    // tile
-    g.fillStyle(0x2e2a3a,1).fillRect(0,0,32,32); g.generateTexture('tile',32,32); g.clear();
-    // brick
-    g.fillStyle(0x57455d,1).fillRect(2,2,28,28); g.generateTexture('brick',32,32); g.clear();
-    // spike
-    g.fillStyle(0xb43636,1).fillTriangle(0,32,16,4,32,32); g.generateTexture('spike',32,32); g.clear();
-    // spring
-    g.fillStyle(0x9b6bff,1).fillRect(4,12,24,8); g.generateTexture('spring',32,32); g.clear();
-    // coin
-    g.fillStyle(0xffd369,1).fillCircle(16,16,9); g.generateTexture('coin',32,32); g.clear();
-    // flag pole
-    g.fillStyle(0xc0ffb3,1).fillRect(13,0,6,100); g.generateTexture('pole',32,100); g.clear();
-    // flag cloth
-    g.fillStyle(0x45fd6c,1).fillTriangle(16,8,80,24,16,40); g.generateTexture('flag',96,48); g.clear();
-    // enemy
-    g.fillStyle(0xff6e6e,1).fillRect(0,0,24,24); g.generateTexture('enemy',24,24); g.clear();
-    // player
-    g.fillStyle(0xffecef,1).fillRect(0,0,22,28); g.generateTexture('ninja',22,28); g.clear();
-    // key / gate
-    g.fillStyle(0xffd27a,1).fillRect(8,8,16,16); g.generateTexture('key',32,32); g.clear();
-    g.fillStyle(0x3a1a24,1).fillRect(2,2,28,28); g.generateTexture('gate',32,32); g.clear();
-    // scroll (double jump)
-    g.fillStyle(0x7ce8ff,1).fillRect(8,8,16,16); g.generateTexture('scroll',32,32); g.clear();
-  }
-  create(){ this.scene.start('title'); }
-}
-
-/* ================= Title ================= */
-class Title extends Phaser.Scene{
-  constructor(){ super('title'); }
-  create(){
-    const { width:W, height:H } = this.scale;
-    // Background gradient via a big graphics-to-texture
-    const g=this.make.graphics({x:0,y:0,add:false});
-    const grad=this.add.gradientTexture ? null : null;
-    g.fillStyle(0x8A2232,1).fillRect(0,0,W,H);
-    g.fillStyle(0x9B2D3B,0.5).fillRect(0,0,W,H*0.66);
-    g.fillStyle(0xA33C44,0.5).fillRect(0,0,W*0.66,H);
-    g.generateTexture('bg',W,H); g.destroy();
-    this.add.image(W/2,H/2,'bg').setScrollFactor(0);
-    this.add.text(W/2, H*0.32, 'Ninja Worlds — Crimson Dusk', {fontFamily:'system-ui', fontSize:32, fontStyle:'bold', color:'#fff'}).setOrigin(0.5);
-    const play = this.add.text(W/2, H*0.55, 'Play', {fontFamily:'system-ui', fontSize:24, fontStyle:'bold', backgroundColor:'#ffffff', color:'#000', padding:{x:12,y:8}})
-      .setOrigin(0.5).setInteractive({useHandCursor:true});
-    play.on('pointerup', ()=>{
-      // mobile audio unlock
-      try{ const AC=window.AudioContext||window.webkitAudioContext; if(AC){ if(!window._ac) window._ac=new AC(); if(window._ac.state==='suspended') window._ac.resume(); }}catch(_){}
-      this.scene.start('game');
-    });
-    this.add.text(W/2, H*0.65, 'Move: WASD/Arrows · Jump: Space · Pause: P/Esc', {fontFamily:'system-ui', fontSize:14, color:'#fff', align:'center'}).setOrigin(0.5);
-  }
-}
-
-/* ================= Game ================= */
-class Game extends Phaser.Scene{
-  constructor(){ super('game'); }
-  create(){
-    const W = 4200, H = 640;
-    this.physics.world.setBounds(0,0,W,H);
-
-    // Background stripes (simple parallax vibe)
-    const sky = this.add.rectangle(0,0,W,H,0x0b0a0f).setOrigin(0).setScrollFactor(0);
-    this.add.rectangle(0, H-140, W, 140, 0x33111a).setOrigin(0).setScrollFactor(0.1);
-    this.add.rectangle(0, H-220, W, 80, 0x4a1a24).setOrigin(0).setScrollFactor(0.18);
-    this.add.rectangle(0, H-290, W, 70, 0x642233).setOrigin(0).setScrollFactor(0.28);
-
-    /* ---- Level geom (static bodies) ---- */
-    this.platforms = this.physics.add.staticGroup();
-
-    const addRect = (x,y,w,h,tex='tile')=>{
-      const blocks = Math.max(1, Math.round(w/32));
-      for(let i=0;i<blocks;i++){
-        const b = this.platforms.create(x+i*32, y, tex).setOrigin(0,1);
-        b.refreshBody();
-      }
-    };
-    // Floor band
-    for(let x=0; x<W; x+=32){ this.platforms.create(x, H-24, 'tile').setOrigin(0,1).refreshBody(); }
-    // Platforms / gaps
-    addRect(200, H-120, 200, 18,'brick');
-    addRect(520, H-200, 260, 18,'brick');
-    addRect(920, H-140, 200, 18,'brick');
-    addRect(1280, H-220, 260, 18,'brick');
-    addRect(1720, H-160, 200, 18,'brick');
-    addRect(2100, H-200, 260, 18,'brick');
-
-    // Gate + flag at end
-    this.gate = this.physics.add.staticImage(W-220, H-24, 'gate').setOrigin(0,1).refreshBody();
-    this.flagPole = this.add.image(W-120, H-24, 'pole').setOrigin(0,1);
-    this.flag = this.add.image(W-104, H-120, 'flag').setOrigin(0,0.5);
-
-    // Hazards / pickups
-    this.spikes = this.physics.add.staticGroup();
-    this.spikes.create(620, H-24, 'spike').setOrigin(0,1).refreshBody();
-    this.spikes.create(652, H-24, 'spike').setOrigin(0,1).refreshBody();
-
-    this.spring = this.physics.add.staticImage(480, H-24, 'spring').setOrigin(0,1).refreshBody();
-
-    this.coins = this.physics.add.staticGroup();
-    [300,340,380,900,940,980,1300,1340,1380,2000].forEach(x=>{
-      this.coins.create(x, H-180, 'coin').setOrigin(0.5,0.5).refreshBody();
-    });
-
-    this.scroll = this.physics.add.staticImage(1500, H-260, 'scroll').setOrigin(0,1).refreshBody(); // grants double jump
-
-    // Player
-    this.player = this.physics.add.sprite(80, H-200, 'ninja').setOrigin(0,1);
-    this.player.body.setSize(22,28).setOffset(0,0);
-    this.player.setCollideWorldBounds(true);
-    this.player.onGround = false;
-    this.player.coyote = 0;
-    this.player.jbuf   = 0;
-    this.player.jumps  = 0;
-    this.player.maxJ   = 1;
-
-    // Enemies
-    this.enemies = this.physics.add.group({allowGravity:true, immovable:false});
-    const mkEnemy = (x,y,vx)=>{ const e=this.enemies.create(x,y,'enemy').setOrigin(0,1); e.body.setSize(24,24); e.setVelocityX(vx); return e; };
-    mkEnemy(800,  H-24,  60);
-    mkEnemy(1180, H-24, -60);
-    mkEnemy(1860, H-24,  60);
-
-    // Physics collisions
-    this.physics.add.collider(this.player, this.platforms, ()=>{}, null, this);
-    this.physics.add.collider(this.enemies, this.platforms);
-    this.physics.add.collider(this.player, this.spikes, ()=>{ this.hurt(); }, null, this);
-    this.physics.add.overlap(this.player, this.coins, (pl,c)=>{ c.destroy(); this.coinsTaken++; this.updateHUD(); }, null, this);
-    this.physics.add.overlap(this.player, this.scroll, (pl,s)=>{ s.destroy(); this.player.maxJ=2; this.showPopup('Double Jump!'); }, null, this);
-    this.physics.add.overlap(this.player, this.gate, ()=>{ if(this.playerKey) this.win(); }, null, this);
-
-    // HUD text
-    this.hud = {
-      hp:   this.add.text(12,12,'HP: ❤❤❤',{fontFamily:'system-ui',fontSize:16,color:'#fff'}).setScrollFactor(0),
-      coin: this.add.text(12,32,'Coins: 0/10',{fontFamily:'system-ui',fontSize:16,color:'#fff'}).setScrollFactor(0),
-      tip:  this.add.text(12,52,'WASD/Arrows · Space to jump · P pause',{fontFamily:'system-ui',fontSize:14,color:'#fff',alpha:.85}).setScrollFactor(0)
-    };
-    this.coinsTaken=0; this.totalCoins=this.coins.getChildren().length;
-    this.updateHUD();
-
-    // Camera
-    this.cameras.main.setBounds(0,0,W,H);
-    this.cameras.main.startFollow(this.player, true, 0.12, 0.12, -window.innerWidth*0.38, 0);
-
-    // Input
-    this.cursors = this.input.keyboard.createCursorKeys();
-    this.keys = this.input.keyboard.addKeys('W,A,S,D,J,SHIFT');
-    this.input.keyboard.on('keydown-P', ()=>this.togglePause());
-    this.input.keyboard.on('keydown-ESC',()=>this.togglePause());
-
-    // Pause overlay text
-    this.pauseText = this.add.text(this.scale.width/2, this.scale.height/2, 'Paused\nPress P/Esc', 
-      {fontFamily:'system-ui',fontSize:28,color:'#fff',align:'center'}).setOrigin(0.5).setScrollFactor(0).setVisible(false);
-
-    // Spawn safely: snap to ground
-    for(let i=0;i<80;i++){
-      if(this.player.body.blocked.down){ break; }
-      this.player.y += 2;
-    }
-  }
-
-  update(time,dtMs){
-    const dt = Math.min(50, dtMs)/1000;
-    if(this.isPaused) return;
-
-    // Desktop input → Input map
-    const left  = this.cursors.left.isDown || this.keys.A.isDown || Input.left;
-    const right = this.cursors.right.isDown|| this.keys.D.isDown || Input.right;
-    const jumpDown = this.cursors.space.isDown || this.keys.W.isDown || this.keys.UP?.isDown || Input.jump;
-    const jumpPressed = Phaser.Input.Keyboard.JustDown(this.cursors.space) || Phaser.Input.Keyboard.JustDown(this.keys.W) || Phaser.Input.Keyboard.JustDown(this.keys.UP) || Input.jumpPressed;
-
-    Input.jumpPressed = false; // consume touch-press edge
-
-    const p = this.player, body = p.body;
-
-    // Custom gravity per phase (Arcade uses world gravity; we emulate per-body with velocity)
-    if(body.velocity.y < 0){ body.setAccelerationY(PHYS.GRAV_UP); }
-    else                  { body.setAccelerationY(PHYS.GRAV_DOWN); }
-    if(body.velocity.y > PHYS.MAX_FALL) body.setVelocityY(PHYS.MAX_FALL);
-
-    // Ground check (Arcade flag is reliable after collide step)
-    const wasOn = p.onGround;
-    p.onGround = body.blocked.down;
-    if(p.onGround){ p.coyote = PHYS.COYOTE; p.jumps=0; }
-    else { p.coyote = Math.max(0, p.coyote - dt); }
-
-    // Jump buffer
-    if(jumpPressed) p.jbuf = PHYS.JBUF;
-    p.jbuf = Math.max(0, p.jbuf - dt);
-
-    // Move
-    let ax = (right?1:0) - (left?1:0);
-    if(ax!==0){
-      const accel = p.onGround ? PHYS.ACCEL : PHYS.AIR_ACCEL;
-      body.setVelocityX(Phaser.Math.Clamp(body.velocity.x + ax*accel*dt, -PHYS.RUN_MAX, PHYS.RUN_MAX));
-    }else{
-      // Decel
-      const dec = (p.onGround? PHYS.DECEL : PHYS.AIR_DECEL) * dt;
-      const vx = body.velocity.x;
-      const nvx = Math.abs(vx) <= dec ? 0 : (vx - Math.sign(vx)*dec);
-      body.setVelocityX(nvx);
-    }
-
-    // Variable jump + coyote + buffer
-    if(p.jbuf>0 && (p.coyote>0 || (!p.onGround && p.jumps < p.maxJ))){
-      body.setVelocityY(-PHYS.JUMP_V);
-      p.jumps++;
-      p.coyote = 0; p.jbuf = 0;
-    }
-    // Cut jump height when released
-    if(!jumpDown && body.velocity.y < PHYS.CUT_V) body.setVelocityY(PHYS.CUT_V);
-
-    // Enemies simple patrol & collisions
-    this.enemies.children.iterate(e=>{
-      if(!e) return;
-      // Turn at edges or walls
-      const blocked = e.body.blocked.left || e.body.blocked.right;
-      if(blocked) e.setVelocityX(-e.body.velocity.x);
-      // Player stomp vs damage
-      if(Phaser.Geom.Intersects.RectangleToRectangle(e.getBounds(), p.getBounds())){
-        if(body.velocity.y > 80 && (p.y <= e.y - 2)){
-          // stomp
-          e.destroy();
-          body.setVelocityY(-PHYS.JUMP_V*0.6);
-        }else{
-          this.hurt();
-        }
-      }
-    });
-
-    // Spring
-    if(this.physics.overlap(this.player, this.spring) && body.velocity.y >= 0){
-      body.setVelocityY(-PHYS.JUMP_V*1.25);
-    }
-
-    // Gate (win) if you got the key — for now auto-open on touch end
-    if(Phaser.Geom.Intersects.RectangleToRectangle(this.gate.getBounds(), p.getBounds())){
-      this.win();
-    }
-
-    // Death pit
-    if(p.y > this.physics.world.bounds.height + 100){
-      this.respawn();
-    }
-  }
-
-  updateHUD(){
-    const hearts = '❤❤❤'; // simple (we reset on respawn)
-    this.hud.hp.setText('HP: '+hearts);
-    this.hud.coin.setText(`Coins: ${this.coinsTaken}/${this.totalCoins}`);
-  }
-
-  showPopup(text){
-    const t=this.add.text(this.player.x, this.player.y-60, text, {fontFamily:'system-ui',fontSize:16,color:'#fff'}).setOrigin(0.5);
-    this.tweens.add({targets:t, y:t.y-30, alpha:0, duration:900, onComplete:()=>t.destroy()});
-  }
-
-  hurt(){
-    // simple blink + knockback; reset for now
-    this.cameras.main.flash(120, 255, 64, 64);
-    this.respawn();
-  }
-
-  respawn(){
-    const H=this.physics.world.bounds.height;
-    this.player.setVelocity(0,0).setPosition(80, H-200);
-    // snap ground
-    for(let i=0;i<80;i++){ if(this.player.body.blocked.down) break; this.player.y += 2; }
-  }
-
-  win(){
-    this.scene.pause();
-    const w=this.add.text(this.scale.width/2, this.scale.height/2, 'Gate Cleared!\nClick to replay',
-      {fontFamily:'system-ui',fontSize:28,color:'#fff',align:'center'}).setOrigin(0.5).setScrollFactor(0);
-    this.input.once('pointerup', ()=>{ w.destroy(); this.scene.restart(); });
-  }
-
-  togglePause(){
-    this.isPaused = !this.isPaused;
-    this.scene.physics.world.isPaused = this.isPaused;
-    this.pauseText.setVisible(this.isPaused);
-  }
-}
-
-/* ================= Game config ================= */
-const config = {
-  type: Phaser.AUTO,
-  parent: 'game',
-  backgroundColor: '#0b0a0f',
-  scale: { mode: Phaser.Scale.RESIZE, autoCenter: Phaser.Scale.CENTER_BOTH },
-  physics: { default:'arcade', arcade:{ gravity:{y:0}, debug:false } }, // custom per-body grav in update()
-  scene: [Boot, Title, Game]
+/* ===== Physics: Mario-like tuning ===== */
+const PHY = {
+  RUN_MAX: 360,
+  ACC_G:   900,
+  DEC_G:   1400,
+  ACC_A:   650,
+  GRAV_UP:   1100,
+  GRAV_DOWN: 1800,
+  TERM_V:   1600,
+  JUMP_V:    760,
+  CUT_V:     280,
+  COYOTE:   0.08,
+  JBUF:     0.12
 };
-new Phaser.Game(config);
+let coyTime=0, jumpBuf=0, prevJump=false;
 
-/* ================= Desktop keys → Input map ================= */
-window.addEventListener('keydown', (e)=>{
+/* ===== Input ===== */
+const keys=Object.create(null);
+addEventListener('keydown', e=>{
   const k=e.key.toLowerCase();
-  if(['arrowleft','a'].includes(k)) Input.left=true;
-  if(['arrowright','d'].includes(k)) Input.right=true;
-  if([' ','w','arrowup'].includes(k)){ Input.jump=true; Input.jumpPressed=true; }
+  if([' ','arrowleft','arrowright','arrowup','arrowdown'].includes(e.key)) e.preventDefault();
+  keys[k]=true;
+  if(k==='p' || e.key==='Escape') paused=!paused;
 });
-window.addEventListener('keyup', (e)=>{
-  const k=e.key.toLowerCase();
-  if(['arrowleft','a'].includes(k)) Input.left=false;
-  if(['arrowright','d'].includes(k)) Input.right=false;
-  if([' ','w','arrowup'].includes(k)) Input.jump=false;
-});
+addEventListener('keyup',   e=>{ keys[e.key.toLowerCase()]=false; });
+addEventListener('blur',    ()=>{ for(const k in keys) keys[k]=false; });
+
+/* ===== Collisions (separate axis) ===== */
+function resolveX(ent, dx){
+  if(dx===0) return;
+  ent.x += dx;
+  const L = Math.floor(ent.x/TILE);
+  const R = Math.floor((ent.x+ent.w-1)/TILE);
+  const T = Math.floor(ent.y/TILE);
+  const B = Math.floor((ent.y+ent.h-1)/TILE);
+  for(let ty=T; ty<=B; ty++){
+    for(let tx=L; tx<=R; tx++){
+      const id = tileAt(tx*TILE+1, ty*TILE+1);
+      if(!isSolid(id)) continue;
+      if(dx>0) ent.x = tx*TILE - ent.w; else ent.x = (tx+1)*TILE;
+      ent.vx = 0; return;
+    }
+  }
+  // hazards touch while sweeping X
+  if(ent===player){
+    for(let ty=T; ty<=B; ty++) for(let tx=L; tx<=R; tx++){
+      if(isDeadly(tileAt(tx*TILE+1, ty*TILE+1))) damage(1);
+    }
+  }
+}
+function resolveY(ent, dy){
+  if(dy===0) return;
+  ent.y += dy;
+  const L = Math.floor(ent.x/TILE);
+  const R = Math.floor((ent.x+ent.w-1)/TILE);
+  const T = Math.floor(ent.y/TILE);
+  const B = Math.floor((ent.y+ent.h-1)/TILE);
+  let landed=false;
+  for(let ty=T; ty<=B; ty++){
+    for(let tx=L; tx<=R; tx++){
+      const id = tileAt(tx*TILE+1, ty*TILE+1);
+      if(!isSolid(id)) continue;
+      if(dy>0){ ent.y = ty*TILE - ent.h; ent.vy=0; landed=true; }
+      else    { ent.y = (ty+1)*TILE; if(ent.vy<0) ent.vy=0; }
+      ty=B+1; break; // stop after resolving a tile on Y
+    }
+  }
+  if(ent===player){
+    player.on = landed;
+    // coins / spikes / flag
+    for(let ty=T; ty<=B; ty++){
+      for(let tx=L; tx<=R; tx++){
+        const id = tileAt(tx*TILE+1, ty*TILE+1);
+        if(id===3){ Level.map[ty][tx]=0; player.coins++; beep(880,.06); updateHUD(); }
+        if(id===4) damage(1);
+        if(id===5) youWin();
+      }
+    }
+  }
+}
+
+/* ===== HUD ===== */
+const HUD = { hp:document.getElementById('hp'), coins:document.getElementById('coins') };
+function updateHUD(){
+  HUD.hp.textContent = 'HP: ' + '❤'.repeat(player.hp) + '♡'.repeat(Math.max(0,3-player.hp));
+  HUD.coins.textContent = 'Coins: ' + player.coins;
+}
+function damage(n){
+  player.hp = Math.max(0, player.hp - n);
+  updateHUD(); if(player.hp===0) respawn();
+}
+function respawn(){
+  player.x=3*TILE; player.y=(Level.h-4)*TILE - player.h;
+  player.vx=player.vy=0; player.on=false; coyTime=0; jumpBuf=0;
+}
+
+/* ===== Game loop pieces ===== */
+let running=false, paused=false;
+
+function update(dt){
+  if(!running || paused) return;
+
+  // === Player movement (Mario-ish) ===
+  const left  = !!(keys.a || keys.arrowleft);
+  const right = !!(keys.d || keys.arrowright);
+  const jump  = !!(keys[' '] || keys.space);
+
+  if(right) player.face=1; else if(left) player.face=-1;
+
+  coyTime = player.on ? PHY.COYOTE : Math.max(0, coyTime - dt);
+  jumpBuf = jump ? PHY.JBUF : Math.max(0, jumpBuf - dt);
+  if (jump) jumpBuf = PHY.JBUF; // buffer refresh while held
+
+  const want = (right?1:0) - (left?1:0);
+  if(want!==0){
+    const acc = player.on ? PHY.ACC_G : PHY.ACC_A;
+    player.vx += want * acc * dt;
+    player.vx = clamp(player.vx, -PHY.RUN_MAX, PHY.RUN_MAX);
+  }else if(player.on){
+    const m = Math.min(Math.abs(player.vx), PHY.DEC_G*dt);
+    player.vx -= Math.sign(player.vx)*m; if(Math.abs(player.vx)<0.01) player.vx=0;
+  }
+
+  const canGroundJump = (coyTime>0);
+  if(jumpBuf>0 && canGroundJump){
+    player.vy = -PHY.JUMP_V; player.on=false; coyTime=0; jumpBuf=0; player.jumps=1; beep(600,.05);
+  }
+
+  // short hop
+  if(!jump && prevJump && player.vy < -PHY.CUT_V) player.vy = -PHY.CUT_V;
+  prevJump = jump;
+
+  // gravity
+  const g = (player.vy<0) ? PHY.GRAV_UP : PHY.GRAV_DOWN;
+  player.vy = Math.min(PHY.TERM_V, player.vy + g*dt);
+
+  // integrate vs tiles
+  resolveX(player, player.vx * dt);
+  const prevY = player.y;
+  resolveY(player, player.vy * dt);
+  if(player.on && player.y===prevY) player.jumps=0;
+
+  // enemies
+  for(const e of enemies){
+    if(!e.alive) continue;
+    // simple AI: flip at edges or walls
+    const aheadX = e.x + (e.vx>0 ? e.w+1 : -1);
+    const footY  = e.y + e.h + 2;
+    const wall   = tileAt(aheadX, e.y + e.h/2);
+    const ground = tileAt(e.x + e.w/2 + (e.vx>0?14:-14), footY);
+    if(isSolid(wall) || !isSolid(ground)) e.vx *= -1;
+
+    e.vy = Math.min(PHY.TERM_V, e.vy + PHY.GRAV_DOWN*dt);
+    resolveX(e, e.vx*dt);
+    resolveY(e, e.vy*dt);
+
+    // stomp / hurt
+    if(AABB(player,e)){
+      const prevBottom = player.y + player.h - player.vy*dt;
+      if(player.vy>0 && prevBottom <= e.y+6){ e.alive=false; player.vy=-PHY.JUMP_V*0.6; beep(720,.06); }
+      else damage(1);
+    }
+  }
+
+  // death pit
+  if(player.y > Level.h*TILE + 200) damage(3);
+
+  // camera
+  const cw=C.clientWidth;
+  const tx = clamp(player.x - cw*0.4, 0, Level.w*TILE - cw);
+  cam.x += (tx - cam.x) * 0.15; cam.y=0;
+}
+
+function draw(t){
+  const cw=C.clientWidth, ch=C.clientHeight;
+
+  // background gradient (crimson dusk)
+  const wobble=Math.sin(t*.3)*16;
+  const grad=g.createLinearGradient(0,ch+wobble,0,0);
+  grad.addColorStop(0.00,'#8A2232');
+  grad.addColorStop(0.33,'#9B2D3B');
+  grad.addColorStop(0.66,'#A33C44');
+  grad.addColorStop(1.00,'#FFB37E');
+  g.fillStyle=grad; g.fillRect(0,0,cw,ch);
+
+  // tiles in view
+  const startTx = Math.floor(cam.x/TILE);
+  const endTx   = Math.ceil((cam.x+cw)/TILE);
+  for(let ty=0; ty<Level.h; ty++){
+    for(let tx=startTx; tx<Math.min(endTx,Level.w); tx++){
+      const id=Level.map[ty][tx]; if(!id) continue;
+      const x=tx*TILE - cam.x, y=ty*TILE - cam.y;
+      if(id===1){ g.fillStyle='#2e2a3a'; g.fillRect(x,y,TILE,TILE); }           // ground
+      if(id===2){ g.fillStyle='#57455d'; g.fillRect(x+2,y+2,TILE-4,TILE-4); }   // brick
+      if(id===3){ g.fillStyle='gold'; g.beginPath(); g.arc(x+16,y+16,7,0,Math.PI*2); g.fill(); } // coin
+      if(id===4){ g.fillStyle='#b43636'; g.beginPath(); g.moveTo(x,y+TILE); g.lineTo(x+TILE/2,y+4); g.lineTo(x+TILE,y+TILE); g.closePath(); g.fill(); } // spikes
+      if(id===5){ g.fillStyle='#c0ffb3'; g.fillRect(x+20,y-100,6,100); g.fillStyle='#45fd6c'; g.beginPath(); g.moveTo(x+26,y-96); g.lineTo(x+80,y-76); g.lineTo(x+26,y-56); g.closePath(); g.fill(); } // flag
+    }
+  }
+
+  // enemies
+  g.fillStyle='#ff6e6e';
+  for(const e of enemies){ if(!e.alive) continue; g.fillRect(Math.floor(e.x-cam.x), Math.floor(e.y-cam.y), e.w, e.h); }
+
+  // player (simple)
+  g.fillStyle='#ffecef';
+  g.fillRect(Math.floor(player.x-cam.x), Math.floor(player.y-cam.y), player.w, player.h);
+}
+
+/* ===== Loop ===== */
+let last=performance.now();
+function loop(now){
+  const dt=Math.min(50, now-last)/1000; last=now;
+  if(running) update(dt);
+  draw(now/1000);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+/* ===== Flow (Title -> Play) ===== */
+const title = document.getElementById('title');
+const hud   = document.getElementById('hud');
+const playBtn = document.getElementById('playBtn');
+
+function startGame(){
+  // mobile audio unlock
+  try{
+    const AC=window.AudioContext||window.webkitAudioContext;
+    if(AC){ if(!window._ac) window._ac=new AC(); if(window._ac.state==='suspended') window._ac.resume(); }
+  }catch(_){}
+  title.classList.add('hide');
+  hud.classList.remove('hide');
+  updateHUD();
+  running=true;
+}
+// click/tap anywhere or button
+playBtn.addEventListener('pointerdown', startGame, {once:true});
+title.addEventListener('pointerdown',  (e)=>{ if(e.target===title) startGame(); }, {once:true});
+window.addEventListener('keydown',     (e)=>{ if(!running) startGame(); }, {once:true});
 </script>
 </body>
 </html>
