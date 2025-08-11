@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>Ninja Worlds — Playable Base (Mario-feel)</title>
+<title>Ninja Worlds — Enemies + Sword</title>
 <style>
   html,body{margin:0;height:100%;background:#1a0f0f;color:#fff;font:14px/1.15 system-ui,-apple-system,Segoe UI,Inter}
   canvas{display:block;width:100vw;height:100vh;outline:none}
-  #hud{position:fixed;left:12px;top:10px;display:flex;gap:10px;z-index:5}
+  #hud{position:fixed;left:12px;top:10px;display:flex;gap:10px;z-index:5;flex-wrap:wrap}
   .badge{background:rgba(0,0,0,.45);padding:6px 10px;border-radius:10px;font-weight:800}
   .btns{position:fixed;right:12px;top:10px;display:flex;gap:8px;z-index:5}
   .btn{border:0;border-radius:10px;padding:6px 10px;font-weight:800;cursor:pointer;background:#fff;color:#000}
@@ -16,11 +16,11 @@
 </style>
 </head>
 <body>
-<canvas id="game" aria-label="Ninja Worlds — Playable Base"></canvas>
+<canvas id="game" aria-label="Ninja Worlds — Enemies + Sword"></canvas>
 
 <div id="hud">
   <div id="coins" class="badge">Coins: 0</div>
-  <div id="tips"  class="badge">Move: ←→ / A D · Jump: Space · Pause: P</div>
+  <div id="tips"  class="badge">←→ / A D · Jump: Space · Attack (Sword): J · Pause: P</div>
 </div>
 <div class="btns">
   <button id="mute" class="btn">🔊</button>
@@ -55,7 +55,7 @@ function beep(f=600,d=.06,v=.05){
   }catch(_){}
 }
 
-/* ===== level data (from your screenshot) ===== */
+/* ===== level data ===== */
 const TILE=24;
 const LEVEL = {
   ground: [
@@ -75,33 +75,29 @@ const LEVEL = {
   ],
   goal: {x:146, h:6}
 };
-const HUD = { coins:coinsEl('#coins'), msg:ge('#msg'), msgText:ge('#msgText') };
-function ge(s){ return document.querySelector(s); }
-function coinsEl(s){ return document.querySelector(s); }
+const HUD = { coins:document.querySelector('#coins'), msg:document.querySelector('#msg'), msgText:document.querySelector('#msgText') };
 
 let running=true;
-ge('#pause').onclick=()=>{ running=!running; pause.textContent=running?'Pause':'Resume'; };
-ge('#reset').onclick=()=>reset();
+document.getElementById('pause').onclick=()=>{ running=!running; pause.textContent=running?'Pause':'Resume'; };
+document.getElementById('reset').onclick=()=>reset();
 
-/* ===== player (Mario-like feel tuned) ===== */
+/* ===== player (Mario-like feel tuned, 7x jump height) ===== */
 const CFG = {
-  // Horizontal
-  TOP_SPEED: 330,          // max run speed
-  ACCEL_GROUND: 6400,      // how fast we reach speed on ground
-  ACCEL_AIR: 2200,         // reduced control in air
-  DECEL_GROUND: 5200,      // braking when opposite or no input
-  FRICTION_GROUND: 12,     // tiny decay when no input
-  // Jumping / Gravity
-  JUMP_V: 760,             // initial jump velocity
-  CUT_JUMP_V: 180,         // short hop cap
+  TOP_SPEED: 330,
+  ACCEL_GROUND: 6400,
+  ACCEL_AIR: 2200,
+  DECEL_GROUND: 5200,
+  FRICTION_GROUND: 12,
+  // gravity stayed the same; jump speed scaled by √7 ≈ 2.646 for ~7× height
+  JUMP_V: 760 * 2.646,     // ≈ 2010
+  CUT_JUMP_V: 220,
   GRAVITY: 2400,
-  GRAVITY_FALL: 3200,      // heavier falling
-  MAX_FALL: 1500,
-  // Mario-quality helpers
-  COYOTE: 0.10,            // 100ms after leaving ledge
-  JUMP_BUFFER: 0.12        // 120ms before landing
+  GRAVITY_FALL: 3200,
+  MAX_FALL: 1600,
+  COYOTE: 0.10,
+  JUMP_BUFFER: 0.12
 };
-const player = {x: TILE*4, y: 0, w: 16, h: 22, vx: 0, vy: 0, on:false, face:1, coins:0};
+const player = {x: TILE*4, y: 0, w: 16, h: 22, vx: 0, vy: 0, on:false, face:1, coins:0, attackT:0};
 let coyote = 0, jbuf = 0;
 
 /* ===== input ===== */
@@ -110,6 +106,7 @@ addEventListener('keydown',e=>{
   const k=e.key.toLowerCase(); keys[k]=true;
   if([' ','arrowleft','arrowright'].includes(e.key)) e.preventDefault();
   if(k==='p') { running=!running; pause.textContent=running?'Pause':'Resume'; }
+  if(k==='j') { tryAttack(); }
 });
 addEventListener('keyup',e=>{ keys[e.key.toLowerCase()]=false; });
 addEventListener('blur', ()=>{ for(const k in keys) keys[k]=false; });
@@ -148,11 +145,76 @@ function collideY(p,segs,dy){
   p.on=on;
 }
 
+/* ===== enemies ===== */
+const enemies=[];
+function addEnemy(tx, ty, dir=1){
+  enemies.push({
+    x: tx*TILE, y: worldHeightPx()+ty*TILE-18, w:18, h:18,
+    vx: 60*dir, vy:0, alive:true
+  });
+}
+function initEnemies(){
+  enemies.length=0;
+  addEnemy(40,-1,1);
+  addEnemy(90,-1,-1);
+  addEnemy(120,-3,1);
+}
+function updateEnemies(dt){
+  const segs=segments();
+  for(const e of enemies){
+    if(!e.alive) continue;
+
+    // simple AI: flip at walls or edges
+    const aheadX = e.x + (e.vx>0 ? e.w+1 : -1);
+    const groundProbeX = e.x + e.w/2 + (e.vx>0 ? 14 : -14);
+    const groundProbeY = e.y + e.h + 2;
+    const wallHit = segs.some(s => AABB({x:aheadX,y:e.y+e.h/2,w:1,h:1}, s));
+    const edge = !segs.some(s => AABB({x:groundProbeX,y:groundProbeY,w:2,h:2}, s));
+    if(wallHit || edge) e.vx *= -1;
+
+    // physics
+    e.vy += CFG.GRAVITY * dt; if(e.vy>CFG.MAX_FALL) e.vy=CFG.MAX_FALL;
+    collideX(e,segs, e.vx*dt);
+    collideY(e,segs, e.vy*dt);
+
+    // player interactions
+    if(AABB(player,e)){
+      const prevBottom = player.y + player.h - player.vy*dt;
+      if(player.vy>0 && prevBottom <= e.y+6){
+        // stomp
+        e.alive=false; player.vy = -CFG.JUMP_V*0.5; beep(740,.06,.05);
+      }else if(player.attackT>0){
+        e.alive=false; beep(640,.05,.05);
+      }else{
+        // knockback
+        player.vx += (player.x<e.x? -180:180);
+        player.vy = -380;
+        beep(220,.06,.06);
+      }
+    }
+  }
+}
+
+/* ===== sword attack ===== */
+function tryAttack(){
+  if(player.attackT>0) return;
+  player.attackT = 0.14; // seconds
+  beep(520,.05,.05);
+}
+function swordHitbox(){
+  const w=16, h=12;
+  return {
+    x: player.x + (player.face>0 ? player.w : -w),
+    y: player.y + 5, w, h
+  };
+}
+
 /* ===== update ===== */
 function update(dt){
   // timers
   coyote = Math.max(0, player.on ? CFG.COYOTE : coyote - dt);
   jbuf   = Math.max(0, jbuf - dt);
+  player.attackT = Math.max(0, player.attackT - dt);
 
   // input
   const left  = keys.a||keys.arrowleft;
@@ -164,50 +226,42 @@ function update(dt){
   const want = (right?1:0) - (left?1:0);
   const accel = player.on ? CFG.ACCEL_GROUND : CFG.ACCEL_AIR;
 
-  // accelerate toward target
   player.vx += want * accel * dt;
 
-  // apply ground braking / friction when no input
+  // ground braking / friction
   if(player.on){
     if(want===0){
       player.vx *= Math.max(0, 1 - CFG.FRICTION_GROUND*dt);
       if(Math.abs(player.vx)<12) player.vx=0;
-    }else{
-      // strong decel if reversing direction
-      if(Math.sign(player.vx) !== Math.sign(want)){
-        const dec = Math.min(Math.abs(player.vx), CFG.DECEL_GROUND*dt);
-        player.vx -= Math.sign(player.vx)*dec;
-      }
+    }else if(Math.sign(player.vx)!==Math.sign(want)){
+      const dec = Math.min(Math.abs(player.vx), CFG.DECEL_GROUND*dt);
+      player.vx -= Math.sign(player.vx)*dec;
     }
   }
 
-  // clamp run speed
   player.vx = clamp(player.vx, -CFG.TOP_SPEED, CFG.TOP_SPEED);
   if(right) player.face=1; if(left) player.face=-1;
 
-  // jumping with coyote + buffer
+  // jumping
   if(jbuf>0 && (player.on || coyote>0)){
     player.vy = -CFG.JUMP_V;
     player.on=false; coyote=0; jbuf=0; keys[' ']=keys.space=false;
     beep(720,.06,.05);
   }
 
-  // variable gravity (heavier fall; short-hop)
+  // gravity (variable)
   const rising = player.vy < 0;
   const holdingJump = keys[' ']||keys.space;
   const gAcc = rising && holdingJump ? CFG.GRAVITY : CFG.GRAVITY_FALL;
   player.vy += gAcc * dt;
   player.vy = Math.min(player.vy, CFG.MAX_FALL);
+  if(!holdingJump && player.vy < -CFG.CUT_JUMP_V) player.vy = -CFG.CUT_JUMP_V;
 
-  // short-hop cut
-  if(!holdingJump && player.vy < -CFG.CUT_JUMP_V){
-    player.vy = -CFG.CUT_JUMP_V;
-  }
-
-  // integrate + collide
+  // integrate + collide with level
   const segs = segments();
   collideX(player,segs, player.vx*dt);
   collideY(player,segs, player.vy*dt);
+  if(player.on) coyote = CFG.COYOTE;
 
   // coins
   for(let i=LEVEL.coins.length-1;i>=0;i--){
@@ -215,6 +269,15 @@ function update(dt){
     const r = {x:c.x*TILE-5, y:worldHeightPx()+c.y*TILE-5, w:10, h:10};
     if(AABB(player,r)){ LEVEL.coins.splice(i,1); player.coins++; HUD.coins.textContent='Coins: '+player.coins; beep(880,.05,.05); }
   }
+
+  // sword hits enemies
+  if(player.attackT>0){
+    const h = swordHitbox();
+    for(const e of enemies){ if(e.alive && AABB(h,e)){ e.alive=false; beep(640,.05,.05); } }
+  }
+
+  // enemies
+  updateEnemies(dt);
 
   // win
   const goal = {x:LEVEL.goal.x*TILE, y:worldHeightPx()-LEVEL.goal.h*TILE, w:10, h:LEVEL.goal.h*TILE};
@@ -256,9 +319,32 @@ function draw(t){
     g.beginPath(); g.arc(x,y,5,0,Math.PI*2); g.fill();
   }
 
-  // player
-  g.fillStyle='#fff';
-  rect(player.x,player.y,player.w,player.h);
+  // enemies
+  for(const e of enemies){
+    if(!e.alive) continue;
+    g.fillStyle='#ff6e6e';
+    rect(e.x,e.y,e.w,e.h);
+    // little eyes
+    g.fillStyle='#1a0f0f';
+    rect(e.x+4,e.y+6,3,3); rect(e.x+e.w-7,e.y+6,3,3);
+  }
+
+  // player (bandana + face)
+  // body
+  g.fillStyle='#fff'; rect(player.x,player.y,player.w,player.h);
+  // bandana
+  g.fillStyle='#e33'; rect(player.x-2, player.y-6, player.w+4, 5);
+  // bandana tails
+  g.fillStyle='#e66'; rect(player.x+player.w-3, player.y-6, 8, 2); rect(player.x+player.w-3, player.y-3, 6, 2);
+  // face (eyes)
+  g.fillStyle='#1a0f0f'; rect(player.x+4, player.y+7, 2,2); rect(player.x+player.w-6, player.y+7, 2,2);
+
+  // sword flash
+  if(player.attackT>0){
+    const h = swordHitbox();
+    g.fillStyle='rgba(255,255,255,.25)';
+    rect(h.x,h.y,h.w,h.h);
+  }
 }
 
 /* ===== loop ===== */
@@ -274,12 +360,17 @@ requestAnimationFrame(frame);
 /* ===== reset ===== */
 function reset(){
   player.x=TILE*4; player.y=worldHeightPx()-player.h-1;
-  player.vx=0; player.vy=0; player.on=false; coyote=0; jbuf=0; HUD.msg.hidden=true;
+  player.vx=0; player.vy=0; player.on=false; coyote=0; jbuf=0; player.attackT=0;
   LEVEL.coins=[{x:21.5,y:-5.2},{x:67.5,y:-7.2},{x:129.5,y:-7.2}];
   player.coins=0; HUD.coins.textContent='Coins: 0';
+  HUD.msg.hidden=true;
+  initEnemies();
 }
 reset();
 C.focus();
+
+/* ===== buttons ===== */
+let runningFlag=true;
 </script>
 </body>
 </html>
