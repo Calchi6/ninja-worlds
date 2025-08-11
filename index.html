@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>Ninja Worlds — Playable Base</title>
+<title>Ninja Worlds — Playable Base (Mario-feel)</title>
 <style>
   html,body{margin:0;height:100%;background:#1a0f0f;color:#fff;font:14px/1.15 system-ui,-apple-system,Segoe UI,Inter}
   canvas{display:block;width:100vw;height:100vh;outline:none}
@@ -30,7 +30,7 @@
 <div id="msg" hidden><span id="msgText">You win!</span></div>
 
 <script>
-/* ===== canvas setup (CSS px physics) ===== */
+/* ===== canvas (CSS px physics) ===== */
 const C = document.getElementById('game');
 const g = C.getContext('2d');
 function fit(){
@@ -41,7 +41,7 @@ function fit(){
 }
 addEventListener('resize', fit); fit();
 
-/* ===== tiny audio (beep only) ===== */
+/* ===== tiny audio ===== */
 let muted=false;
 document.getElementById('mute').onclick=()=>{ muted=!muted; mute.textContent = muted?'🔇':'🔊'; };
 function beep(f=600,d=.06,v=.05){
@@ -49,16 +49,15 @@ function beep(f=600,d=.06,v=.05){
   try{
     const AC=window.AudioContext||window.webkitAudioContext; if(!AC) return;
     if(!window._ac) window._ac=new AC();
-    const ac=_ac, o=ac.createOscillator(), g=ac.createGain();
-    o.type='square'; o.frequency.value=f; g.gain.value=v;
-    o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime+d);
+    const ac=_ac, o=ac.createOscillator(), ge=ac.createGain();
+    o.type='square'; o.frequency.value=f; ge.gain.value=v;
+    o.connect(ge); ge.connect(ac.destination); o.start(); o.stop(ac.currentTime+d);
   }catch(_){}
 }
 
-/* ===== world ===== */
+/* ===== level data (from your screenshot) ===== */
 const TILE=24;
 const LEVEL = {
-  // ground & gaps (as in your screenshot)
   ground: [
     {x:0,   w:36},
     {x:42,  w:22},
@@ -66,47 +65,44 @@ const LEVEL = {
     {x:98,  w:46},
     {x:152, w:30}
   ],
-  // small raised platforms (dark slates)
   slabs: [
-    // left island
     {x:18,y:-4,w:5},{x:24,y:-4,w:5},{x:30,y:-4,w:5},
-    // middle island
     {x:64,y:-6,w:4},{x:69,y:-6,w:4},{x:74,y:-6,w:4},
-    // right island
     {x:122,y:-6,w:4},{x:127,y:-6,w:4},{x:132,y:-6,w:4}
   ],
-  // coins on top (yellow dots)
   coins: [
     {x:21.5,y:-5.2},{x:67.5,y:-7.2},{x:129.5,y:-7.2}
   ],
-  // simple “goal” pillar to the far right
   goal: {x:146, h:6}
 };
-
-const HUD = {
-  coins: document.getElementById('coins'),
-  msg: document.getElementById('msg'),
-  msgText: document.getElementById('msgText')
-};
+const HUD = { coins:coinsEl('#coins'), msg:ge('#msg'), msgText:ge('#msgText') };
+function ge(s){ return document.querySelector(s); }
+function coinsEl(s){ return document.querySelector(s); }
 
 let running=true;
-document.getElementById('pause').onclick=()=>{ running=!running; pause.textContent=running?'Pause':'Resume'; };
-document.getElementById('reset').onclick=()=>reset();
+ge('#pause').onclick=()=>{ running=!running; pause.textContent=running?'Pause':'Resume'; };
+ge('#reset').onclick=()=>reset();
 
-/* ===== player (Mario-ish feel) ===== */
+/* ===== player (Mario-like feel tuned) ===== */
 const CFG = {
-  GRAV: 2400,
-  MAX_FALL: 1400,
-  RUN: 340,
-  AIR_ACCEL: 2200,
-  GROUND_ACCEL: 5200,
-  FRICTION: 12,         // higher = stickier stop
-  JUMP_V: 720,
-  CUT_JUMP_V: 180,      // jump cut when releasing early
+  // Horizontal
+  TOP_SPEED: 330,          // max run speed
+  ACCEL_GROUND: 6400,      // how fast we reach speed on ground
+  ACCEL_AIR: 2200,         // reduced control in air
+  DECEL_GROUND: 5200,      // braking when opposite or no input
+  FRICTION_GROUND: 12,     // tiny decay when no input
+  // Jumping / Gravity
+  JUMP_V: 760,             // initial jump velocity
+  CUT_JUMP_V: 180,         // short hop cap
+  GRAVITY: 2400,
+  GRAVITY_FALL: 3200,      // heavier falling
+  MAX_FALL: 1500,
+  // Mario-quality helpers
+  COYOTE: 0.10,            // 100ms after leaving ledge
+  JUMP_BUFFER: 0.12        // 120ms before landing
 };
 const player = {x: TILE*4, y: 0, w: 16, h: 22, vx: 0, vy: 0, on:false, face:1, coins:0};
-
-function worldHeightPx(){ return C.height - TILE*6; } // baseline ground band
+let coyote = 0, jbuf = 0;
 
 /* ===== input ===== */
 const keys=Object.create(null);
@@ -122,101 +118,110 @@ addEventListener('blur', ()=>{ for(const k in keys) keys[k]=false; });
 function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
 function AABB(a,b){ return a.x<b.x+b.w && a.x+a.w>b.x && a.y<b.y+b.h && a.y+a.h>b.y; }
 function rect(x,y,w,h){ g.fillRect(Math.floor(x),Math.floor(y),w,h); }
+function worldHeightPx(){ return C.height/(devicePixelRatio||1) - TILE*6; }
 
 /* ===== collision against level ===== */
-function platforms(){
+function segments(){
   const baseY = worldHeightPx();
-  const segs = [];
-
-  // ground segments
-  for(const s of LEVEL.ground){
-    segs.push({x:s.x*TILE, y:baseY, w:s.w*TILE, h:TILE});
-  }
-  // slabs (raised blocks)
+  const segs=[];
+  for(const s of LEVEL.ground) segs.push({x:s.x*TILE, y:baseY, w:s.w*TILE, h:TILE});
   for(const s of LEVEL.slabs){
     const y = baseY + s.y*TILE;
     segs.push({x:s.x*TILE, y:y, w:s.w*TILE, h:TILE});
   }
-  // goal pillar
   segs.push({x:LEVEL.goal.x*TILE, y:baseY - LEVEL.goal.h*TILE, w:10, h:LEVEL.goal.h*TILE});
   return segs;
 }
-
-function resolveCollisions(p, segs, dx, dy){
-  // move X
-  p.x += dx;
-  for(const s of segs){
-    if(AABB(p,s)){
-      if(dx>0) p.x = s.x - p.w;
-      else     p.x = s.x + s.w;
-      p.vx = 0;
-    }
+function collideX(p,segs,dx){
+  p.x+=dx;
+  for(const s of segs) if(AABB(p,s)){
+    if(dx>0) p.x=s.x-p.w; else p.x=s.x+s.w;
+    p.vx=0;
   }
-  // move Y
-  p.y += dy; p.on=false;
-  for(const s of segs){
-    if(AABB(p,s)){
-      if(dy>0){ p.y = s.y - p.h; p.vy = 0; p.on = true; }
-      else     { p.y = s.y + s.h; if(p.vy<0) p.vy = 0; }
-    }
+}
+function collideY(p,segs,dy){
+  p.y+=dy; let on=false;
+  for(const s of segs) if(AABB(p,s)){
+    if(dy>0){ p.y=s.y-p.h; p.vy=0; on=true; }
+    else     { p.y=s.y+s.h; if(p.vy<0) p.vy=0; }
   }
+  p.on=on;
 }
 
 /* ===== update ===== */
 function update(dt){
+  // timers
+  coyote = Math.max(0, player.on ? CFG.COYOTE : coyote - dt);
+  jbuf   = Math.max(0, jbuf - dt);
+
   // input
   const left  = keys.a||keys.arrowleft;
   const right = keys.d||keys.arrowright;
   const jump  = keys[' ']||keys.space;
+  if(jump) jbuf = CFG.JUMP_BUFFER;
 
-  // horizontal accel (Mario-ish: big ground accel, lighter air control)
-  const accel = player.on ? CFG.GROUND_ACCEL : CFG.AIR_ACCEL;
-  let ax = (right?1:0) - (left?1:0);
-  player.vx += ax * accel * dt;
-  player.vx = clamp(player.vx, -CFG.RUN, CFG.RUN);
-  if(ax===0 && player.on){
-    player.vx *= Math.max(0, 1 - CFG.FRICTION*dt);
-    if(Math.abs(player.vx)<12) player.vx = 0;
+  // horizontal accel
+  const want = (right?1:0) - (left?1:0);
+  const accel = player.on ? CFG.ACCEL_GROUND : CFG.ACCEL_AIR;
+
+  // accelerate toward target
+  player.vx += want * accel * dt;
+
+  // apply ground braking / friction when no input
+  if(player.on){
+    if(want===0){
+      player.vx *= Math.max(0, 1 - CFG.FRICTION_GROUND*dt);
+      if(Math.abs(player.vx)<12) player.vx=0;
+    }else{
+      // strong decel if reversing direction
+      if(Math.sign(player.vx) !== Math.sign(want)){
+        const dec = Math.min(Math.abs(player.vx), CFG.DECEL_GROUND*dt);
+        player.vx -= Math.sign(player.vx)*dec;
+      }
+    }
   }
+
+  // clamp run speed
+  player.vx = clamp(player.vx, -CFG.TOP_SPEED, CFG.TOP_SPEED);
   if(right) player.face=1; if(left) player.face=-1;
 
-  // jumping
-  if(jump && player.on){
+  // jumping with coyote + buffer
+  if(jbuf>0 && (player.on || coyote>0)){
     player.vy = -CFG.JUMP_V;
-    player.on=false; keys[' ']=keys.space=false;
-    beep(700,.06,.05);
+    player.on=false; coyote=0; jbuf=0; keys[' ']=keys.space=false;
+    beep(720,.06,.05);
   }
-  // short-hop if released early
-  if(!(keys[' ']||keys.space) && player.vy < -CFG.CUT_JUMP_V){
+
+  // variable gravity (heavier fall; short-hop)
+  const rising = player.vy < 0;
+  const holdingJump = keys[' ']||keys.space;
+  const gAcc = rising && holdingJump ? CFG.GRAVITY : CFG.GRAVITY_FALL;
+  player.vy += gAcc * dt;
+  player.vy = Math.min(player.vy, CFG.MAX_FALL);
+
+  // short-hop cut
+  if(!holdingJump && player.vy < -CFG.CUT_JUMP_V){
     player.vy = -CFG.CUT_JUMP_V;
   }
 
-  // gravity
-  player.vy += CFG.GRAV*dt;
-  if(player.vy > CFG.MAX_FALL) player.vy = CFG.MAX_FALL;
-
   // integrate + collide
-  const dx = player.vx*dt, dy = player.vy*dt;
-  resolveCollisions(player, platforms(), dx, dy);
+  const segs = segments();
+  collideX(player,segs, player.vx*dt);
+  collideY(player,segs, player.vy*dt);
 
-  // coins pickup
+  // coins
   for(let i=LEVEL.coins.length-1;i>=0;i--){
     const c = LEVEL.coins[i];
     const r = {x:c.x*TILE-5, y:worldHeightPx()+c.y*TILE-5, w:10, h:10};
-    if(AABB(player,r)){ LEVEL.coins.splice(i,1); player.coins++; HUD.coins.textContent = 'Coins: '+player.coins; beep(880,.05,.05); }
+    if(AABB(player,r)){ LEVEL.coins.splice(i,1); player.coins++; HUD.coins.textContent='Coins: '+player.coins; beep(880,.05,.05); }
   }
 
-  // win if touch goal pillar side
-  const goalRect = {x:LEVEL.goal.x*TILE, y:worldHeightPx()-LEVEL.goal.h*TILE, w:10, h:LEVEL.goal.h*TILE};
-  if(AABB(player, goalRect)){
-    running=false;
-    HUD.msgText.textContent='You Win! 🎉';
-    HUD.msg.hidden=false;
-  }
+  // win
+  const goal = {x:LEVEL.goal.x*TILE, y:worldHeightPx()-LEVEL.goal.h*TILE, w:10, h:LEVEL.goal.h*TILE};
+  if(AABB(player,goal)){ running=false; HUD.msgText.textContent='You Win! 🎉'; HUD.msg.hidden=false; }
 
-  // death pit safeguard
-  const floorY = worldHeightPx()+TILE*2;
-  if(player.y>floorY){ reset(); }
+  // death pit
+  if(player.y > worldHeightPx()+TILE*2) reset();
 }
 
 /* ===== render ===== */
@@ -224,30 +229,24 @@ function draw(t){
   const cw = C.width/(devicePixelRatio||1);
   const ch = C.height/(devicePixelRatio||1);
 
-  // sky gradient (crimson dusk)
-  const wobble = Math.sin(t*0.3)*18;
-  const grad = g.createLinearGradient(0,0,0,ch+wobble);
+  // crimson dusk gradient
+  const wobble=Math.sin(t*0.3)*18;
+  const grad=g.createLinearGradient(0,0,0,ch+wobble);
   grad.addColorStop(0.00,'#f08a7a');
   grad.addColorStop(0.40,'#c1494f');
   grad.addColorStop(1.00,'#8a1f2b');
-  g.fillStyle = grad; g.fillRect(0,0,cw,ch);
+  g.fillStyle=grad; g.fillRect(0,0,cw,ch);
 
-  // ground band
-  g.fillStyle = '#2a1c22';
-  for(const s of LEVEL.ground){
-    const x=s.x*TILE, y=worldHeightPx(), w=s.w*TILE, h=TILE;
-    rect(x,y,w,h);
-  }
+  // ground
+  g.fillStyle='#2a1c22';
+  for(const s of LEVEL.ground) rect(s.x*TILE, worldHeightPx(), s.w*TILE, TILE);
 
   // slabs
-  g.fillStyle = '#43506a';
-  for(const s of LEVEL.slabs){
-    const x=s.x*TILE, y=worldHeightPx()+s.y*TILE, w=s.w*TILE, h=TILE;
-    rect(x,y,w,h);
-  }
+  g.fillStyle='#43506a';
+  for(const s of LEVEL.slabs) rect(s.x*TILE, worldHeightPx()+s.y*TILE, s.w*TILE, TILE);
 
-  // goal pillar
-  g.fillStyle = '#3aff76';
+  // goal
+  g.fillStyle='#3aff76';
   rect(LEVEL.goal.x*TILE, worldHeightPx()-LEVEL.goal.h*TILE, 10, LEVEL.goal.h*TILE);
 
   // coins
@@ -257,9 +256,9 @@ function draw(t){
     g.beginPath(); g.arc(x,y,5,0,Math.PI*2); g.fill();
   }
 
-  // player (white rect)
+  // player
   g.fillStyle='#fff';
-  rect(player.x, player.y, player.w, player.h);
+  rect(player.x,player.y,player.w,player.h);
 }
 
 /* ===== loop ===== */
@@ -272,12 +271,11 @@ function frame(now){
 }
 requestAnimationFrame(frame);
 
-/* ===== reset / start ===== */
+/* ===== reset ===== */
 function reset(){
   player.x=TILE*4; player.y=worldHeightPx()-player.h-1;
-  player.vx=0; player.vy=0; player.on=false; HUD.msg.hidden=true;
-  // restore coins (optional comment out if you want them persistent)
-  LEVEL.coins = [{x:21.5,y:-5.2},{x:67.5,y:-7.2},{x:129.5,y:-7.2}];
+  player.vx=0; player.vy=0; player.on=false; coyote=0; jbuf=0; HUD.msg.hidden=true;
+  LEVEL.coins=[{x:21.5,y:-5.2},{x:67.5,y:-7.2},{x:129.5,y:-7.2}];
   player.coins=0; HUD.coins.textContent='Coins: 0';
 }
 reset();
