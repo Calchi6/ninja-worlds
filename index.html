@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>Ninja Worlds — Enemies + Sword + Aura (Higher Jump)</title>
+<title>Ninja Worlds — Higher Jump + Ninja Sprite + Enemy Fix</title>
 <style>
   html,body{margin:0;height:100%;background:#1a0f0f;color:#fff;font:14px/1.15 system-ui,-apple-system,Segoe UI,Inter}
   canvas{display:block;width:100vw;height:100vh;outline:none}
@@ -16,11 +16,11 @@
 </style>
 </head>
 <body>
-<canvas id="game" aria-label="Ninja Worlds — Aura Build"></canvas>
+<canvas id="game" aria-label="Ninja Worlds"></canvas>
 
 <div id="hud">
   <div id="coins" class="badge">Coins: 0</div>
-  <div id="tips"  class="badge">←→ / A D · Jump: Space · Sword: J · Upgrade (demo): U · Pause: P</div>
+  <div class="badge">←→ / A D · Jump: Space · Sword: J · Pause: P</div>
 </div>
 <div class="btns">
   <button id="mute" class="btn">🔊</button>
@@ -30,33 +30,30 @@
 <div id="msg" hidden><span id="msgText">You win!</span></div>
 
 <script>
-/* ===== canvas (CSS px physics) ===== */
+/* ===== canvas ===== */
 const C = document.getElementById('game');
 const g = C.getContext('2d');
-function fit(){
-  const dpr = devicePixelRatio||1;
-  C.width  = Math.round(innerWidth * dpr);
-  C.height = Math.round(innerHeight* dpr);
-  g.setTransform(dpr,0,0,dpr,0,0);
-}
+function fit(){ const dpr=devicePixelRatio||1; C.width=innerWidth*dpr; C.height=innerHeight*dpr; g.setTransform(dpr,0,0,dpr,0,0); }
 addEventListener('resize', fit); fit();
 
 /* ===== tiny audio ===== */
 let muted=false;
-document.getElementById('mute').onclick=()=>{ muted=!muted; mute.textContent = muted?'🔇':'🔊'; };
+mute.onclick=()=>{ muted=!muted; mute.textContent=muted?'🔇':'🔊'; };
 function beep(f=600,d=.06,v=.05){
   if(muted) return;
   try{
     const AC=window.AudioContext||window.webkitAudioContext; if(!AC) return;
     if(!window._ac) window._ac=new AC();
     const ac=_ac, o=ac.createOscillator(), ge=ac.createGain();
-    o.type='square'; o.frequency.value=f; ge.gain.value=v;
-    o.connect(ge); ge.connect(ac.destination); o.start(); o.stop(ac.currentTime+d);
+    o.type='square'; o.frequency.value=f; ge.gain.value=v; o.connect(ge); ge.connect(ac.destination);
+    o.start(); o.stop(ac.currentTime+d);
   }catch(_){}
 }
 
-/* ===== level data ===== */
+/* ===== level ===== */
 const TILE=24;
+const HUD = { coins:document.querySelector('#coins'), msg:document.querySelector('#msg'), msgText:document.querySelector('#msgText') };
+
 const LEVEL = {
   ground: [
     {x:0,   w:36},
@@ -66,78 +63,18 @@ const LEVEL = {
     {x:152, w:30}
   ],
   slabs: [
-    {x:18,y:-4,w:5},{x:24,y:-4,w:5},{x:30,y:-4,w:5},
-    {x:64,y:-6,w:4},{x:69,y:-6,w:4},{x:74,y:-6,w:4},
-    {x:122,y:-6,w:4},{x:127,y:-6,w:4},{x:132,y:-6,w:4}
+    /* a little lower so they’re reachable even without a perfect jump */
+    {x:18,y:-3.8,w:5},{x:24,y:-3.8,w:5},{x:30,y:-3.8,w:5},
+    {x:64,y:-5.2,w:4},{x:69,y:-5.2,w:4},{x:74,y:-5.2,w:4},
+    {x:122,y:-5.2,w:4},{x:127,y:-5.2,w:4},{x:132,y:-5.2,w:4}
   ],
   coins: [
-    {x:21.5,y:-5.2},{x:67.5,y:-7.2},{x:129.5,y:-7.2}
+    {x:21.5,y:-5.0},{x:67.5,y:-6.9},{x:129.5,y:-6.9}
   ],
   goal: {x:146, h:6}
 };
-const HUD = { coins:document.querySelector('#coins'), msg:document.querySelector('#msg'), msgText:document.querySelector('#msgText') };
 
-let running=true;
-document.getElementById('pause').onclick=()=>{ running=!running; pause.textContent=running?'Pause':'Resume'; };
-document.getElementById('reset').onclick=()=>reset();
-
-/* ===== player (Mario feel + much higher jump) ===== */
-const CFG = {
-  TOP_SPEED: 340,
-  ACCEL_GROUND: 7000,
-  ACCEL_AIR: 2400,
-  DECEL_GROUND: 5600,
-  FRICTION_GROUND: 12,
-
-  // Jump ~way higher than before
-  JUMP_V: 7200,         // was ~2010; this really sends you
-  CUT_JUMP_V: 260,      // short hop cap
-  GRAVITY: 2200,        // slightly lighter rise
-  GRAVITY_FALL: 3000,   // heavier fall for snap
-  MAX_FALL: 1700,
-
-  COYOTE: 0.10,
-  JUMP_BUFFER: 0.12
-};
-const player = {
-  x: TILE*4, y: 0, w: 16, h: 22,
-  vx: 0, vy: 0, on:false, face:1, coins:0, attackT:0,
-  auraLevel: 0 // 0..4
-};
-let coyote = 0, jbuf = 0;
-
-/* Aura colors (progression) */
-const AURA = ['#7ce8ff','#7cffb8','#ffd37a','#ff86c8','#b388ff'];
-function coinsToAuraLevel(n){
-  return Math.min(4,
-    n>=12 ? 4 :
-    n>=9  ? 3 :
-    n>=6  ? 2 :
-    n>=3  ? 1 : 0
-  );
-}
-
-/* ===== input ===== */
-const keys=Object.create(null);
-addEventListener('keydown',e=>{
-  const k=e.key.toLowerCase(); keys[k]=true;
-  if([' ','arrowleft','arrowright'].includes(e.key)) e.preventDefault();
-  if(k==='p') { running=!running; pause.textContent=running?'Pause':'Resume'; }
-  if(k==='j') { tryAttack(); }
-  if(k==='u') { // demo: manual aura upgrade
-    player.auraLevel = Math.min(4, player.auraLevel+1);
-  }
-});
-addEventListener('keyup',e=>{ keys[e.key.toLowerCase()]=false; });
-addEventListener('blur', ()=>{ for(const k in keys) keys[k]=false; });
-
-/* ===== helpers ===== */
-function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
-function AABB(a,b){ return a.x<b.x+b.w && a.x+a.w>b.x && a.y<b.y+b.h && a.y+a.h>b.y; }
-function rect(x,y,w,h){ g.fillRect(Math.floor(x),Math.floor(y),w,h); }
 function worldHeightPx(){ return C.height/(devicePixelRatio||1) - TILE*6; }
-
-/* ===== collision against level ===== */
 function segments(){
   const baseY = worldHeightPx();
   const segs=[];
@@ -149,97 +86,133 @@ function segments(){
   segs.push({x:LEVEL.goal.x*TILE, y:baseY - LEVEL.goal.h*TILE, w:10, h:LEVEL.goal.h*TILE});
   return segs;
 }
-function collideX(p,segs,dx){
-  p.x+=dx;
-  for(const s of segs) if(AABB(p,s)){
-    if(dx>0) p.x=s.x-p.w; else p.x=s.x+s.w;
-    p.vx=0;
+
+/* find ground surface at an x to spawn enemies on top */
+function groundSurfaceYAtX(x){
+  const segs=segments();
+  let y=null;
+  for(const s of segs){
+    if(x>=s.x && x<=s.x+s.w){
+      if(y===null || s.y<y) y=s.y; // choose highest ground at x
+    }
   }
-}
-function collideY(p,segs,dy){
-  p.y+=dy; let on=false;
-  for(const s of segs) if(AABB(p,s)){
-    if(dy>0){ p.y=s.y-p.h; p.vy=0; on=true; }
-    else     { p.y=s.y+s.h; if(p.vy<0) p.vy=0; }
-  }
-  p.on=on;
+  return y; // null if over a gap
 }
 
-/* Ground probe helper for AI */
-function isGroundUnderPoint(x, y){
-  const segs = segments();
-  const probe = {x:x-1, y:y-1, w:2, h:2};
-  return segs.some(s => AABB(probe, s));
-}
+/* ===== player (Mario-ish) ===== */
+const CFG = {
+  TOP_SPEED: 360,
+  ACCEL_GROUND: 7600,
+  ACCEL_AIR: 2600,
+  DECEL_GROUND: 6000,
+  FRICTION_GROUND: 12,
+
+  // BIGGER jump (you asked ~7x higher) + variable gravity
+  JUMP_V: 3600,          // <- crank this if still not enough (try 3900)
+  CUT_JUMP_V: 320,
+  GRAVITY: 2100,         // lighter rise
+  GRAVITY_FALL: 3400,    // heavier fall (snappier landings)
+  MAX_FALL: 1800,
+
+  COYOTE: 0.12,
+  JUMP_BUFFER: 0.14
+};
+
+const player = {
+  x: TILE*4, y: 0, w: 16, h: 22,
+  vx: 0, vy: 0, on:false, face:1, coins:0, attackT:0,
+  legPhase:0 // for little step animation
+};
+let coyote=0, jbuf=0;
+
+const keys=Object.create(null);
+addEventListener('keydown',e=>{
+  const k=e.key.toLowerCase(); keys[k]=true;
+  if([' ','arrowleft','arrowright'].includes(e.key)) e.preventDefault();
+  if(k==='p'){ running=!running; pause.textContent=running?'Pause':'Resume'; }
+  if(k==='j'){ tryAttack(); }
+});
+addEventListener('keyup',e=>{ keys[e.key.toLowerCase()]=false; });
+addEventListener('blur', ()=>{ for(const k in keys) keys[k]=false; });
 
 /* ===== enemies ===== */
 const enemies=[];
-function addEnemy(tx, ty, dir=1){
-  enemies.push({
-    x: tx*TILE, y: worldHeightPx()+ty*TILE-18, w:18, h:18,
-    vx: 70*dir, vy:0, alive:true
-  });
+function addEnemyOnGround(tileX, dir=1, speed=80){
+  const x = tileX*TILE;
+  const ySurf = groundSurfaceYAtX(x + 9/*enemy half-ish*/);
+  if(ySurf==null){ return; } // don’t spawn over gaps
+  enemies.push({x:x, y:ySurf-18, w:18,h:18, vx:speed*dir, vy:0, alive:true});
 }
 function initEnemies(){
   enemies.length=0;
-  addEnemy(40,-1,1);
-  addEnemy(90,-1,-1);
-  addEnemy(120,-3,1);
+  addEnemyOnGround(40, 1, 85);
+  addEnemyOnGround(90,-1, 85);
+  addEnemyOnGround(120,1, 90);
 }
+
+/* robust probes so they flip BEFORE gaps/walls */
+function isGroundBelow(x,y){ const segs=segments(); const probe={x:x-1,y:y-1,w:2,h:2}; return segs.some(s=>AABB(probe,s)); }
 function updateEnemies(dt){
   const segs=segments();
   for(const e of enemies){
     if(!e.alive) continue;
-
-    // robust edge/wall flip:
     const dir = e.vx>0 ? 1 : -1;
-    const aheadX = e.x + (dir>0 ? e.w+1 : -1);
-    const aheadMid = {x:aheadX, y:e.y+e.h/2, w:2, h:2};
-    const wallAhead = segs.some(s => AABB(aheadMid, s));
-    const groundAhead = isGroundUnderPoint(e.x + e.w/2 + dir*14, e.y + e.h + 3);
 
-    if(wallAhead || !groundAhead){
-      e.vx *= -1;
-    }
+    // look ahead
+    const aheadX = e.x + (dir>0? e.w+1 : -1);
+    const aheadMid = {x:aheadX, y:e.y+e.h/2, w:2, h:2};
+    const wallAhead = segs.some(s=>AABB(aheadMid,s));
+    const groundAhead = isGroundBelow(e.x + e.w/2 + dir*14, e.y + e.h + 3);
+
+    if(wallAhead || !groundAhead){ e.vx *= -1; }
 
     // physics
-    e.vy += CFG.GRAVITY * dt; if(e.vy>CFG.MAX_FALL) e.vy=CFG.MAX_FALL;
+    e.vy += CFG.GRAVITY*dt; if(e.vy>CFG.MAX_FALL) e.vy=CFG.MAX_FALL;
     collideX(e,segs, e.vx*dt);
     collideY(e,segs, e.vy*dt);
 
-    // player interactions
+    // interactions
     if(AABB(player,e)){
       const prevBottom = player.y + player.h - player.vy*dt;
-      if(player.vy>0 && prevBottom <= e.y+6){
-        // stomp
-        e.alive=false; player.vy = -CFG.JUMP_V*0.45; beep(740,.06,.05);
-      }else if(player.attackT>0){
-        e.alive=false; beep(640,.05,.05);
-      }else{
-        // knockback
-        player.vx += (player.x<e.x? -180:180);
-        player.vy = -420;
-        beep(220,.06,.06);
-      }
+      if(player.vy>0 && prevBottom <= e.y+6){ e.alive=false; player.vy=-CFG.JUMP_V*0.45; beep(740,.06,.05); }
+      else if(player.attackT>0){ e.alive=false; beep(640,.05,.05); }
+      else { player.vx += (player.x<e.x? -200:200); player.vy=-480; beep(220,.06,.06); }
     }
   }
 }
 
-/* ===== sword attack ===== */
-function tryAttack(){
-  if(player.attackT>0) return;
-  player.attackT = 0.14; // seconds
-  beep(520,.05,.05);
+/* ===== collisions ===== */
+function AABB(a,b){ return a.x<b.x+b.w && a.x+a.w>b.x && a.y<b.y+b.h && a.y+a.h>b.y; }
+function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+
+function collideX(ent,segs,dx){
+  ent.x+=dx;
+  for(const s of segs) if(AABB(ent,s)){
+    if(dx>0) ent.x=s.x-ent.w; else ent.x=s.x+s.w;
+    ent.vx=0;
+  }
 }
+function collideY(ent,segs,dy){
+  ent.y+=dy; let on=false;
+  for(const s of segs) if(AABB(ent,s)){
+    if(dy>0){ ent.y=s.y-ent.h; ent.vy=0; on=true; }
+    else     { ent.y=s.y+s.h; if(ent.vy<0) ent.vy=0; }
+  }
+  if(ent===player) player.on=on;
+}
+
+/* ===== sword ===== */
+function tryAttack(){ if(player.attackT>0) return; player.attackT=0.18; beep(520,.05,.05); }
 function swordHitbox(){
-  const w=18, h=12;
-  return {
-    x: player.x + (player.face>0 ? player.w : -w),
-    y: player.y + 5, w, h
-  };
+  const w=22, h=14;
+  return { x: player.x + (player.face>0? player.w : -w), y: player.y + 4, w, h };
 }
 
 /* ===== update ===== */
+let running=true;
+pause.onclick=()=>{ running=!running; pause.textContent=running?'Pause':'Resume'; };
+reset.onclick=()=>reset();
+
 function update(dt){
   // timers
   coyote = Math.max(0, player.on ? CFG.COYOTE : coyote - dt);
@@ -252,13 +225,12 @@ function update(dt){
   const jump  = keys[' ']||keys.space;
   if(jump) jbuf = CFG.JUMP_BUFFER;
 
-  // horizontal accel
+  // horizontal
   const want = (right?1:0) - (left?1:0);
   const accel = player.on ? CFG.ACCEL_GROUND : CFG.ACCEL_AIR;
-
   player.vx += want * accel * dt;
 
-  // ground braking / friction
+  // braking / friction
   if(player.on){
     if(want===0){
       player.vx *= Math.max(0, 1 - CFG.FRICTION_GROUND*dt);
@@ -268,11 +240,10 @@ function update(dt){
       player.vx -= Math.sign(player.vx)*dec;
     }
   }
-
   player.vx = clamp(player.vx, -CFG.TOP_SPEED, CFG.TOP_SPEED);
   if(right) player.face=1; if(left) player.face=-1;
 
-  // jumping
+  // jump
   if(jbuf>0 && (player.on || coyote>0)){
     player.vy = -CFG.JUMP_V;
     player.on=false; coyote=0; jbuf=0; keys[' ']=keys.space=false;
@@ -283,32 +254,25 @@ function update(dt){
   const rising = player.vy < 0;
   const holdingJump = keys[' ']||keys.space;
   const gAcc = rising && holdingJump ? CFG.GRAVITY : CFG.GRAVITY_FALL;
-  player.vy += gAcc * dt;
-  player.vy = Math.min(player.vy, CFG.MAX_FALL);
+  player.vy += gAcc*dt; player.vy = Math.min(player.vy, CFG.MAX_FALL);
   if(!holdingJump && player.vy < -CFG.CUT_JUMP_V) player.vy = -CFG.CUT_JUMP_V;
 
-  // integrate + collide with level
-  const segs = segments();
+  // integrate vs world
+  const segs=segments();
   collideX(player,segs, player.vx*dt);
   collideY(player,segs, player.vy*dt);
-  if(player.on) coyote = CFG.COYOTE;
+  if(player.on) coyote=CFG.COYOTE;
 
-  // coins + aura upgrade
+  // coins
   for(let i=LEVEL.coins.length-1;i>=0;i--){
-    const c = LEVEL.coins[i];
-    const r = {x:c.x*TILE-5, y:worldHeightPx()+c.y*TILE-5, w:10, h:10};
-    if(AABB(player,r)){
-      LEVEL.coins.splice(i,1);
-      player.coins++;
-      HUD.coins.textContent='Coins: '+player.coins;
-      player.auraLevel = coinsToAuraLevel(player.coins);
-      beep(880,.05,.05);
-    }
+    const c=LEVEL.coins[i];
+    const r={x:c.x*TILE-5, y:worldHeightPx()+c.y*TILE-5, w:10, h:10};
+    if(AABB(player,r)){ LEVEL.coins.splice(i,1); player.coins++; HUD.coins.textContent='Coins: '+player.coins; beep(880,.05,.05); }
   }
 
-  // sword hits enemies
+  // sword hits
   if(player.attackT>0){
-    const h = swordHitbox();
+    const h=swordHitbox();
     for(const e of enemies){ if(e.alive && AABB(h,e)){ e.alive=false; beep(640,.05,.05); } }
   }
 
@@ -316,33 +280,34 @@ function update(dt){
   updateEnemies(dt);
 
   // win
-  const goal = {x:LEVEL.goal.x*TILE, y:worldHeightPx()-LEVEL.goal.h*TILE, w:10, h:LEVEL.goal.h*TILE};
+  const goal={x:LEVEL.goal.x*TILE, y:worldHeightPx()-LEVEL.goal.h*TILE, w:10, h:LEVEL.goal.h*TILE};
   if(AABB(player,goal)){ running=false; HUD.msgText.textContent='You Win! 🎉'; HUD.msg.hidden=false; }
 
   // death pit
   if(player.y > worldHeightPx()+TILE*2) reset();
+
+  // leg animation
+  player.legPhase += Math.min(12, Math.abs(player.vx)/120) * dt;
 }
 
 /* ===== render ===== */
-function draw(t){
-  const cw = C.width/(devicePixelRatio||1);
-  const ch = C.height/(devicePixelRatio||1);
+function rect(x,y,w,h){ g.fillRect(Math.floor(x),Math.floor(y),w,h); }
+function hexA(hex,a){const r=parseInt(hex.slice(1,3),16), b=parseInt(hex.slice(5,7),16), gr=parseInt(hex.slice(3,5),16);return`rgba(${r},${gr},${b},${a})`; }
 
-  // crimson dusk gradient
+function draw(t){
+  const cw=C.width/(devicePixelRatio||1), ch=C.height/(devicePixelRatio||1);
+
+  // bg
   const wobble=Math.sin(t*0.3)*18;
   const grad=g.createLinearGradient(0,0,0,ch+wobble);
-  grad.addColorStop(0.00,'#f08a7a');
-  grad.addColorStop(0.40,'#c1494f');
-  grad.addColorStop(1.00,'#8a1f2b');
+  grad.addColorStop(0,'#f08a7a'); grad.addColorStop(.4,'#c1494f'); grad.addColorStop(1,'#8a1f2b');
   g.fillStyle=grad; g.fillRect(0,0,cw,ch);
 
-  // ground
+  // ground & slabs
   g.fillStyle='#2a1c22';
-  for(const s of LEVEL.ground) rect(s.x*TILE, worldHeightPx(), s.w*TILE, TILE);
-
-  // slabs
+  for(const s of LEVEL.ground) rect(s.x*TILE,worldHeightPx(),s.w*TILE,TILE);
   g.fillStyle='#43506a';
-  for(const s of LEVEL.slabs) rect(s.x*TILE, worldHeightPx()+s.y*TILE, s.w*TILE, TILE);
+  for(const s of LEVEL.slabs) rect(s.x*TILE,worldHeightPx()+s.y*TILE,s.w*TILE,TILE);
 
   // goal
   g.fillStyle='#3aff76';
@@ -358,48 +323,48 @@ function draw(t){
   // enemies
   for(const e of enemies){
     if(!e.alive) continue;
-    g.fillStyle='#ff6e6e';
-    rect(e.x,e.y,e.w,e.h);
-    // eyes
-    g.fillStyle='#1a0f0f';
-    rect(e.x+4,e.y+6,3,3); rect(e.x+e.w-7,e.y+6,3,3);
+    g.fillStyle='#ff6e6e'; rect(e.x,e.y,e.w,e.h);
+    g.fillStyle='#1a0f0f'; rect(e.x+4,e.y+6,3,3); rect(e.x+e.w-7,e.y+6,3,3);
   }
 
-  // player aura (soft glow, color by level)
-  const aura = AURA[player.auraLevel];
-  const aX = player.x + player.w/2, aY = player.y + player.h/2;
-  for(let i=0;i<3;i++){
-    const r = 18 + i*10;
-    g.fillStyle = hexWithAlpha(aura, 0.12 - i*0.03);
-    g.beginPath(); g.arc(aX, aY, r, 0, Math.PI*2); g.fill();
-  }
+  // ninja aura (light blue base)
+  const aura='#7ce8ff';
+  const aX=player.x+player.w/2, aY=player.y+player.h/2;
+  for(let i=0;i<3;i++){ const r=18+i*10; g.fillStyle=hexA(aura,0.12-i*0.03); g.beginPath(); g.arc(aX,aY,r,0,Math.PI*2); g.fill(); }
 
-  // player (bandana + face)
-  g.fillStyle='#fff'; rect(player.x,player.y,player.w,player.h);                 // body
-  g.fillStyle='#e33'; rect(player.x-2, player.y-6, player.w+4, 5);               // bandana
-  g.fillStyle='#e66'; rect(player.x+player.w-3, player.y-6, 8, 2);               // tails
-  g.fillStyle='#e66'; rect(player.x+player.w-3, player.y-3, 6, 2);
-  g.fillStyle='#1a0f0f'; rect(player.x+4, player.y+7, 2,2); rect(player.x+player.w-6, player.y+7, 2,2); // eyes
+  // ninja body: head, torso, legs, bandana, eyes
+  // torso
+  g.fillStyle='#fff'; rect(player.x, player.y+6, player.w, player.h-6);
+  // head
+  g.fillStyle='#eaeaea'; rect(player.x+2, player.y, player.w-4, 8);
+  // bandana
+  g.fillStyle='#e33'; rect(player.x-2, player.y-4, player.w+4, 4);
+  g.fillStyle='#e66'; rect(player.x+player.w-3, player.y-4, 7,2); rect(player.x+player.w-4, player.y-2, 6,2);
+  // eyes
+  g.fillStyle='#1a0f0f'; rect(player.x+4, player.y+3, 2,2); rect(player.x+player.w-6, player.y+3, 2,2);
+  // legs (simple walk cycle)
+  const legOff = Math.sin(player.legPhase*6)*2.5;
+  g.fillStyle='#ddd';
+  rect(player.x+3,           player.y+player.h-5, 3, 5); // left
+  rect(player.x+player.w-6,  player.y+player.h-5, 3, 5); // right
+  g.fillStyle='#bbb';
+  rect(player.x+3,           player.y+player.h-5 + (legOff>0? 0:Math.abs(legOff)), 3, 5);
+  rect(player.x+player.w-6,  player.y+player.h-5 + (legOff<0? 0:Math.abs(legOff)), 3, 5);
 
-  // sword flash
+  // sword flash / hitbox
   if(player.attackT>0){
-    const h = swordHitbox();
-    g.fillStyle='rgba(255,255,255,.25)';
-    rect(h.x,h.y,h.w,h.h);
+    const h=swordHitbox();
+    // chunky slash
+    g.fillStyle='rgba(255,255,255,.28)';
+    rect(h.x, h.y, h.w, h.h);
+    // highlight spark
+    g.fillStyle='rgba(255,240,220,.4)';
+    rect(h.x+(player.face>0? h.w-4:0), h.y+2, 4, h.h-4);
   }
 }
 
-/* small helper: hex -> rgba alpha */
-function hexWithAlpha(hex, a){
-  // #rrggbb
-  const r=parseInt(hex.slice(1,3),16);
-  const gC=parseInt(hex.slice(3,5),16);
-  const b=parseInt(hex.slice(5,7),16);
-  return `rgba(${r},${gC},${b},${a})`;
-}
-
-/* ===== loop ===== */
-let last=performance.now();
+/* ===== loop / reset ===== */
+let last=performance.now(), running=true;
 function frame(now){
   const dt=Math.min(50, now-last)/1000; last=now;
   if(running) update(dt);
@@ -408,14 +373,11 @@ function frame(now){
 }
 requestAnimationFrame(frame);
 
-/* ===== reset ===== */
 function reset(){
   player.x=TILE*4; player.y=worldHeightPx()-player.h-1;
-  player.vx=0; player.vy=0; player.on=false; coyote=0; jbuf=0; player.attackT=0;
-  player.coins=0; HUD.coins.textContent='Coins: 0';
-  player.auraLevel=0;
-  LEVEL.coins=[{x:21.5,y:-5.2},{x:67.5,y:-7.2},{x:129.5,y:-7.2}];
+  player.vx=0; player.vy=0; player.on=false; coyote=0; jbuf=0; player.attackT=0; player.coins=0; HUD.coins.textContent='Coins: 0';
   HUD.msg.hidden=true;
+  LEVEL.coins=[{x:21.5,y:-5.0},{x:67.5,y:-6.9},{x:129.5,y:-6.9}];
   initEnemies();
 }
 reset();
